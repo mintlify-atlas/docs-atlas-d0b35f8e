@@ -1,0 +1,337 @@
+---
+title: "Process Catalog API"
+description: "Static process definitions and contracts"
+---
+
+# Process Catalog API
+
+The Process Catalog API provides read-only access to the static, immutable definitions of all production processes in the system. These process contracts define validation rules, quality parameters, and operational characteristics.
+
+## Authentication
+
+**Permission:** `VIEW_PROCESSES`
+
+All endpoints require authentication with VIEW_PROCESSES permission.
+
+## Get All Processes
+
+```http
+GET /api/procesos
+```
+
+Returns the complete catalog of production process definitions.
+
+### Response
+
+<ResponseField name="procesos" type="array">
+  Array of process contract objects
+  <Expandable title="proceso properties">
+    <ResponseField name="processId" type="integer">
+      Process ID (1-9)
+    </ResponseField>
+    <ResponseField name="nombre" type="string">
+      Process name (e.g., "Extrusor PP", "Telares")
+    </ResponseField>
+    <ResponseField name="descripcion" type="string">
+      Process description
+    </ResponseField>
+    <ResponseField name="unidadProduccion" type="string">
+      Production unit: kg, m, unidades, impresiones
+    </ResponseField>
+    <ResponseField name="requiereCalidad" type="boolean">
+      Whether quality validation is mandatory
+    </ResponseField>
+    <ResponseField name="parametrosCalidad" type="array">
+      List of quality parameters with validation rules
+    </ResponseField>
+    <ResponseField name="frecuenciaMuestreo" type="object">
+      Sampling frequency requirements
+      <Expandable title="properties">
+        <ResponseField name="muestrasMinTurno" type="integer">
+          Minimum samples required per shift
+        </ResponseField>
+        <ResponseField name="metodo" type="string">
+          Sampling method description
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+    <ResponseField name="requiereParametrosOperativos" type="boolean">
+      Whether operational parameters must be recorded
+    </ResponseField>
+    <ResponseField name="parametrosOperativos" type="array">
+      List of operational parameters (temperatures, speeds, etc.)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example Request
+
+```bash cURL
+curl -X GET https://api.example.com/api/procesos \\
+  -H "Authorization: Bearer <token>"
+```
+
+### Example Response
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "processId": 1,
+      "nombre": "Extrusor PP",
+      "descripcion": "Extrusi\u00f3n de cinta de polipropileno",
+      "unidadProduccion": "kg",
+      "requiereCalidad": true,
+      "parametrosCalidad": [
+        {
+          "nombre": "Denier",
+          "tipo": "num\u00e9rico",
+          "unidad": "denier",
+          "rangoMin": 800,
+          "rangoMax": 1300,
+          "obligatorio": true
+        },
+        {
+          "nombre": "Resistencia",
+          "tipo": "num\u00e9rico",
+          "unidad": "N",
+          "rangoMin": 40,
+          "rangoMax": 65,
+          "obligatorio": true
+        },
+        {
+          "nombre": "Tenacidad",
+          "tipo": "calculado",
+          "formula": "resistencia / denier",
+          "rangoMin": 4.0,
+          "rangoMax": 7.0,
+          "obligatorio": false
+        }
+      ],
+      "frecuenciaMuestreo": {
+        "muestrasMinTurno": 3,
+        "metodo": "Una muestra cada 4 horas de operaci\u00f3n continua"
+      },
+      "requiereParametrosOperativos": true,
+      "parametrosOperativos": [
+        {"nombre": "Temp Zona 1", "tipo": "temperatura", "unidad": "\u00b0C"},
+        {"nombre": "Temp Zona 2", "tipo": "temperatura", "unidad": "\u00b0C"},
+        {"nombre": "Velocidad Extrusor", "tipo": "velocidad", "unidad": "RPM"}
+      ]
+    },
+    {
+      "processId": 2,
+      "nombre": "Telares",
+      "descripcion": "Tejedur\u00eda circular de tela PP",
+      "unidadProduccion": "m",
+      "requiereCalidad": true,
+      "parametrosCalidad": [
+        {
+          "nombre": "Ancho",
+          "tipo": "num\u00e9rico",
+          "unidad": "cm",
+          "rangoMin": 103,
+          "rangoMax": 107,
+          "tolerancia": 2,
+          "obligatorio": true
+        },
+        {
+          "nombre": "Construcci\u00f3n",
+          "tipo": "enum",
+          "valoresPermitidos": ["10x10", "12x12", "14x14"],
+          "obligatorio": true
+        }
+      ],
+      "frecuenciaMuestreo": {
+        "muestrasMinTurno": 2,
+        "metodo": "Una muestra al inicio de turno y una muestra intermedia"
+      },
+      "requiereParametrosOperativos": false
+    }
+  ]
+}
+```
+
+## Get Process by ID
+
+```http
+GET /api/procesos/:id
+```
+
+Returns the contract for a specific production process.
+
+### Path Parameters
+
+<ParamField path="id" type="integer" required>
+  Process ID (1-9)
+</ParamField>
+
+### Response
+
+Single process contract object with same structure as GET all.
+
+### Example Request
+
+```bash cURL
+curl -X GET https://api.example.com/api/procesos/1 \\
+  -H "Authorization: Bearer <token>"
+```
+
+### Error Responses
+
+<ResponseField name="404 Not Found">
+  Process ID not found:
+  ```json
+  {
+    "success": false,
+    "error": "Proceso no encontrado."
+  }
+  ```
+</ResponseField>
+
+## Process IDs
+
+The system defines 9 production processes:
+
+| ID | Process Name | Unit | Description |
+|----|--------------|------|-------------|
+| 1 | Extrusor PP | kg | Polypropylene tape extrusion |
+| 2 | Telares | m | Circular weaving |
+| 3 | Laminado | m | Lamination |
+| 4 | Imprenta | impresiones | Flexographic printing |
+| 5 | Conversi\u00f3n | unidades | Bag conversion |
+| 6 | Liner PE | unidades | PE liner production |
+| 7 | Extrusor PE | kg | Polyethylene extrusion |
+| 8 | Vestidos | unidades | Lined bag assembly |
+| 9 | Extrusor PP (Secondary) | kg | Secondary PP extruder |
+
+## Process Contracts
+
+### Purpose
+
+Process contracts are immutable definitions that enforce:
+
+1. **Quality Requirements**: What parameters must be measured and validated
+2. **Sampling Frequency**: How often quality checks are required
+3. **Validation Rules**: Acceptable ranges, tolerances, and formulas
+4. **Data Structure**: Expected format for production and quality data
+5. **Operational Requirements**: What process parameters must be recorded
+
+### Implementation
+
+From `contracts/ProcessRegistry.js`:
+
+```javascript
+class ProcessContract {
+  constructor(config) {
+    this.processId = config.processId;
+    this.nombre = config.nombre;
+    this.unidadProduccion = config.unidadProduccion;
+    this.parametrosCalidad = config.parametrosCalidad || [];
+    this.frecuenciaMuestreo = config.frecuenciaMuestreo;
+  }
+
+  validarParametro(nombre, valor) {
+    const param = this.parametrosCalidad.find(p => p.nombre === nombre);
+    if (!param) return { valido: false, error: `Par\u00e1metro '${nombre}' no definido` };
+
+    if (param.tipo === 'num\u00e9rico') {
+      const num = parseFloat(valor);
+      if (num < param.rangoMin || num > param.rangoMax) {
+        return { valido: false, error: `Valor fuera de rango (${param.rangoMin}-${param.rangoMax})` };
+      }
+    }
+
+    return { valido: true };
+  }
+}
+```
+
+### Validation Example
+
+When recording quality data (`bitacora.service.js:427`):
+
+```javascript
+for (const m of muestras) {
+  const valParam = contract.validarParametro(m.parametro, m.valor);
+  if (!valParam.valido) {
+    throw new ValidationError(`Validaci\u00f3n de par\u00e1metro fallida: ${valParam.error}`);
+  }
+}
+```
+
+## Use Cases
+
+### Frontend Validation
+
+Fetch process contract before displaying quality form:
+
+```javascript
+const contract = await fetch('/api/procesos/1').then(r => r.json());
+
+// Render form with dynamic fields
+contract.data.parametrosCalidad.forEach(param => {
+  renderField(param.nombre, param.tipo, param.rangoMin, param.rangoMax);
+});
+```
+
+### API Integration
+
+Validate data before submission:
+
+```javascript
+const contract = await fetch('/api/procesos/2').then(r => r.json());
+const muestrasMinimas = contract.data.frecuenciaMuestreo.muestrasMinTurno;
+
+if (muestras.length < muestrasMinimas) {
+  alert(`Se requieren al menos ${muestrasMinimas} muestras`);
+}
+```
+
+### Process Configuration
+
+Understand process requirements:
+
+```javascript
+const procesos = await fetch('/api/procesos').then(r => r.json());
+
+procesos.data.forEach(p => {
+  console.log(`${p.nombre}:`);
+  console.log(`  - Unidad: ${p.unidadProduccion}`);
+  console.log(`  - Calidad obligatoria: ${p.requiereCalidad}`);
+  console.log(`  - Muestras/turno: ${p.frecuenciaMuestreo.muestrasMinTurno}`);
+});
+```
+
+## Immutability
+
+<Warning>
+**Read-Only**: Process contracts are immutable by design. They cannot be modified via API. Changes require code deployment.
+
+This ensures:
+- Consistency across all shifts and users
+- Audit trail integrity
+- Compliance with documented procedures
+- No accidental changes to validation logic
+</Warning>
+
+## Best Practices
+
+<Tip>
+**Cache Locally**: Process contracts rarely change. Cache them client-side to reduce API calls and improve performance.
+</Tip>
+
+<Check>
+**Validate Early**: Fetch and validate against process contracts before collecting data. This prevents wasted effort on invalid entries.
+</Check>
+
+<Info>
+**Documentation Reference**: Process contracts serve as machine-readable documentation of quality requirements. Use them to generate training materials and SOPs.
+</Info>
+
+## Related Endpoints
+
+- [Bit\u00e1cora API](/api/production/bitacora) - Uses contracts for validation
+- [Quality Muestras API](/api/quality/muestras) - Parameter validation
+- [Process Guides](/processes/extrusor-pp) - Detailed process documentation

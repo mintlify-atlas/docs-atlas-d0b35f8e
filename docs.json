@@ -119,6 +119,20 @@
               "api/dashboard/summary",
               "api/dashboard/orden"
             ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "api/operations/maquinas",
+              "api/operations/paros"
+            ]
+          },
+          {
+            "group": "System",
+            "pages": [
+              "api/system/procesos",
+              "api/system/bootstrap"
+            ]
           }
         ]
       }

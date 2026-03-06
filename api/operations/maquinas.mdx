@@ -1,0 +1,345 @@
+---
+title: "Machines API"
+description: "Machine status tracking and history management"
+---
+
+# Machines API
+
+The Machines API manages machine status, monitoring, and historical tracking for production equipment.
+
+## Authentication
+
+- **Read operations**: `VIEW_MACHINES` permission
+- **Status updates**: `MANAGE_MACHINES` permission
+
+## Get All Machines
+
+```http
+GET /api/maquinas
+```
+
+**Permission:** `VIEW_MACHINES`
+
+Returns all registered machines with their current operational status.
+
+### Response
+
+Array of machine objects.
+
+<ResponseField name="id" type="integer">
+  Machine ID
+</ResponseField>
+
+<ResponseField name="codigo" type="string">
+  Machine code (e.g., "TEL-01", "CONV-02")
+</ResponseField>
+
+<ResponseField name="nombre" type="string">
+  Machine name
+</ResponseField>
+
+<ResponseField name="proceso_id" type="integer">
+  Assigned process ID (1-9)
+</ResponseField>
+
+<ResponseField name="estado" type="string">
+  Current operational status: Operativa, Mantenimiento, Fuera de servicio
+</ResponseField>
+
+<ResponseField name="capacidad_teorica" type="number">
+  Theoretical production capacity per hour
+</ResponseField>
+
+<ResponseField name="unidad" type="string">
+  Capacity unit (kg/h, m/h, unidades/h, etc.)
+</ResponseField>
+
+<ResponseField name="ultima_actualizacion" type="string">
+  ISO timestamp of last status change
+</ResponseField>
+
+### Example Request
+
+```bash cURL
+curl -X GET https://api.example.com/api/maquinas \\
+  -H "Authorization: Bearer <token>"
+```
+
+### Example Response
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "codigo": "TEL-01",
+      "nombre": "Telar Circular 1",
+      "proceso_id": 2,
+      "estado": "Operativa",
+      "capacidad_teorica": 120,
+      "unidad": "m/h",
+      "ultima_actualizacion": "2026-03-06T14:30:00Z"
+    },
+    {
+      "id": 5,
+      "codigo": "CONV-02",
+      "nombre": "Convertidora 2",
+      "proceso_id": 5,
+      "estado": "Mantenimiento",
+      "capacidad_teorica": 5000,
+      "unidad": "unidades/h",
+      "ultima_actualizacion": "2026-03-06T08:00:00Z"
+    }
+  ]
+}
+```
+
+## Get Machine by ID
+
+```http
+GET /api/maquinas/:id
+```
+
+**Permission:** `VIEW_MACHINES`
+
+Returns detailed information for a specific machine.
+
+### Path Parameters
+
+<ParamField path="id" type="integer" required>
+  Machine ID
+</ParamField>
+
+### Response
+
+Single machine object with same fields as GET all, plus additional details.
+
+## Get Machine History
+
+```http
+GET /api/maquinas/:id/historial
+```
+
+**Permission:** `VIEW_MACHINES`
+
+Returns status change history for a machine.
+
+### Path Parameters
+
+<ParamField path="id" type="integer" required>
+  Machine ID
+</ParamField>
+
+### Response
+
+<ResponseField name="historial" type="array">
+  Array of status change events
+  <Expandable title="event properties">
+    <ResponseField name="id" type="integer">
+      History record ID
+    </ResponseField>
+    <ResponseField name="maquina_id" type="integer">
+      Machine ID
+    </ResponseField>
+    <ResponseField name="estado_anterior" type="string">
+      Previous status
+    </ResponseField>
+    <ResponseField name="estado_nuevo" type="string">
+      New status
+    </ResponseField>
+    <ResponseField name="motivo" type="string">
+      Reason for status change
+    </ResponseField>
+    <ResponseField name="usuario" type="string">
+      User who made the change
+    </ResponseField>
+    <ResponseField name="fecha_cambio" type="string">
+      ISO timestamp of change
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "historial": [
+      {
+        "id": 42,
+        "maquina_id": 5,
+        "estado_anterior": "Operativa",
+        "estado_nuevo": "Mantenimiento",
+        "motivo": "Mantenimiento preventivo programado - cambio de rodamientos",
+        "usuario": "Juan P\u00e9rez",
+        "fecha_cambio": "2026-03-06T08:00:00Z"
+      },
+      {
+        "id": 38,
+        "maquina_id": 5,
+        "estado_anterior": "Mantenimiento",
+        "estado_nuevo": "Operativa",
+        "motivo": "Completado mantenimiento correctivo - falla el\u00e9ctrica",
+        "usuario": "Carlos Ruiz",
+        "fecha_cambio": "2026-03-01T16:45:00Z"
+      }
+    ]
+  }
+}
+```
+
+## Update Machine Status
+
+```http
+PUT /api/maquinas/:id/estado
+```
+
+**Permission:** `MANAGE_MACHINES`
+
+Updates a machine's operational status.
+
+### Path Parameters
+
+<ParamField path="id" type="integer" required>
+  Machine ID
+</ParamField>
+
+### Request Body
+
+<ParamField body="estado" type="string" required>
+  New status: Operativa, Mantenimiento, Fuera de servicio
+</ParamField>
+
+<ParamField body="motivo" type="string" required>
+  Detailed reason for status change (minimum 10 characters)
+</ParamField>
+
+### Business Rules
+
+- Status changes are logged in machine history with full audit trail
+- Cannot change status to the same value (must be different)
+- Motivo is mandatory for all status changes
+- User and timestamp are automatically recorded
+
+### Example Request
+
+```bash cURL
+curl -X PUT https://api.example.com/api/maquinas/5/estado \\
+  -H "Authorization: Bearer <token>" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "estado": "Operativa",
+    "motivo": "Completado mantenimiento preventivo. M\u00e1quina probada y calibrada."
+  }'
+```
+
+### Example Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": 5,
+    "estado": "Operativa",
+    "ultima_actualizacion": "2026-03-06T14:30:00Z",
+    "mensaje": "Estado actualizado correctamente"
+  }
+}
+```
+
+## Machine Status Values
+
+### Operativa (Operational)
+
+<Check>
+- Machine is running and available for production
+- Can be assigned to production orders
+- Production records can be logged
+</Check>
+
+### Mantenimiento (Maintenance)
+
+<Warning>
+- Machine is undergoing scheduled or unscheduled maintenance
+- Cannot be assigned to new production orders
+- Existing orders may be paused or reassigned
+</Warning>
+
+### Fuera de servicio (Out of Service)
+
+<Warning>
+- Machine is permanently or indefinitely unavailable
+- Used for retired equipment or major failures
+- Should not be assigned to any production
+</Warning>
+
+## Integration with Production
+
+Machine status affects production tracking:
+
+1. **Status Validation**: Production records are validated against machine status
+2. **Downtime Tracking**: Status changes trigger downtime (paro) records
+3. **Capacity Planning**: Status affects weekly production planning
+4. **Shift Logs**: Machine status is displayed in bit\u00e1cora dashboards
+
+## Best Practices
+
+<Tip>
+**Proactive Status Updates**: Update machine status immediately when taking equipment offline. This ensures accurate production planning and prevents assignment of orders to unavailable machines.
+</Tip>
+
+<Check>
+**Detailed Motivos**: Provide specific reasons for status changes including:
+- Type of maintenance (preventive, corrective, emergency)
+- Failure description if applicable
+- Expected return to service time
+- Work performed
+</Check>
+
+<Warning>
+**Audit Trail**: All status changes are permanently logged. This data supports:
+- Equipment reliability analysis
+- Maintenance KPIs (MTBF, MTTR)
+- Production efficiency calculations
+- Regulatory compliance
+</Warning>
+
+## Error Responses
+
+<ResponseField name="404 Not Found">
+  Machine ID not found:
+  ```json
+  {
+    "success": false,
+    "error": "M\u00e1quina no encontrada."
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="400 Bad Request">
+  Invalid status value or missing motivo:
+  ```json
+  {
+    "success": false,
+    "error": "El campo 'motivo' es requerido."
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="403 Forbidden">
+  Insufficient permissions:
+  ```json
+  {
+    "success": false,
+    "error": "Permisos insuficientes."
+  }
+  ```
+</ResponseField>
+
+## Related Endpoints
+
+- [Paros (Downtime) API](/api/operations/paros) - Track machine downtime events
+- [Bit\u00e1cora API](/api/production/bitacora) - Shift-level machine monitoring
+- [Planning API](/api/production/planning) - Machine capacity planning

@@ -1,0 +1,354 @@
+---
+title: "Bootstrap API"
+description: "System initialization and first-time setup"
+---
+
+# Bootstrap API
+
+The Bootstrap API manages first-time system initialization, creating the initial administrator account and marking the system as ready for use.
+
+<Warning>
+**One-Time Operation**: Bootstrap can only be performed once. After successful initialization, all bootstrap endpoints are permanently disabled for security.
+</Warning>
+
+## Authentication
+
+Bootstrap endpoints do not require authentication (they run before any users exist). However, they require the correct bootstrap password from environment configuration.
+
+## Get Bootstrap Status
+
+```http
+GET /api/bootstrap/status
+```
+
+Checks whether the system has been initialized.
+
+### Response
+
+<ResponseField name="completed" type="boolean">
+  Whether bootstrap has been completed
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Status message
+</ResponseField>
+
+### Example Request
+
+```bash cURL
+curl -X GET https://api.example.com/api/bootstrap/status
+```
+
+### Example Responses
+
+**Not Yet Initialized:**
+```json
+{
+  "success": true,
+  "data": {
+    "completed": false,
+    "message": "Sistema no inicializado. Requiere bootstrap."
+  }
+}
+```
+
+**Already Initialized:**
+```json
+{
+  "success": true,
+  "data": {
+    "completed": true,
+    "message": "Sistema ya inicializado."
+  }
+}
+```
+
+## Get Initialization Data
+
+```http
+GET /api/bootstrap/data
+```
+
+Returns configuration data needed for the bootstrap UI (areas, roles, etc.).
+
+### Response
+
+<ResponseField name="areas" type="array">
+  Available organizational areas
+</ResponseField>
+
+<ResponseField name="roles" type="array">
+  Available system roles
+</ResponseField>
+
+<ResponseField name="sistemaNombre" type="string">
+  System name (PROD-SYS)
+</ResponseField>
+
+### Example Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "areas": [
+      {"id": 1, "nombre": "Producci\u00f3n"},
+      {"id": 2, "nombre": "Calidad"},
+      {"id": 3, "nombre": "Mantenimiento"},
+      {"id": 4, "nombre": "Administraci\u00f3n"}
+    ],
+    "roles": [
+      {"id": 1, "nombre": "Administrador"},
+      {"id": 2, "nombre": "Supervisor"},
+      {"id": 3, "nombre": "Inspector"},
+      {"id": 4, "nombre": "Operario"}
+    ],
+    "sistemaNombre": "PROD-SYS"
+  }
+}
+```
+
+## Initialize System
+
+```http
+POST /api/bootstrap/init
+```
+
+Performs system initialization, creating the administrator account.
+
+### Request Body
+
+<ParamField body="bootstrapPassword" type="string" required>
+  Bootstrap password from .env file (ADMIN_PASSWORD)
+</ParamField>
+
+<ParamField body="newPassword" type="string" required>
+  New password for the admin account (minimum 8 characters)
+</ParamField>
+
+<ParamField body="adminNombre" type="string">
+  Administrator's first name (defaults to "Administrador")
+</ParamField>
+
+<ParamField body="adminApellido" type="string">
+  Administrator's last name (defaults to "Sistema")
+</ParamField>
+
+### Business Logic
+
+From `bootstrap.service.js:30`:
+
+```javascript
+async initialize(data) {
+  // 1. Check if already initialized
+  const isBootstrapped = await this.repository.isBootstrapCompleted();
+  if (isBootstrapped) {
+    throw new AppError('El sistema ya ha sido inicializado.', 400);
+  }
+
+  // 2. Validate bootstrap password
+  if (data.bootstrapPassword !== process.env.ADMIN_PASSWORD) {
+    throw new AppError('Contrase\u00f1a de bootstrap incorrecta.', 401);
+  }
+
+  // 3. Create admin person record
+  const personaId = await this.repository.createAdminPerson({
+    nombre: data.adminNombre || 'Administrador',
+    apellido: data.adminApellido || 'Sistema',
+    codigo_interno: 'ADMIN-001'
+  });
+
+  // 4. Create admin user account
+  const hashedPassword = await bcrypt.hash(data.newPassword, 10);
+  await this.repository.createAdminUser({
+    persona_id: personaId,
+    username: 'admin',
+    password_hash: hashedPassword,
+    rol: 'Administrador'
+  });
+
+  // 5. Mark bootstrap as completed
+  await this.repository.markBootstrapCompleted();
+
+  // 6. Log audit event
+  await this.auditService.logCreate('SISTEMA', 'Bootstrap', null, {
+    usuario: 'admin',
+    persona_id: personaId
+  }, 'Sistema inicializado');
+
+  return { success: true, username: 'admin' };
+}
+```
+
+### Example Request
+
+```bash cURL
+curl -X POST https://api.example.com/api/bootstrap/init \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "bootstrapPassword": "YourBootstrapPassword123!",
+    "newPassword": "SecureAdminPass456!",
+    "adminNombre": "Carlos",
+    "adminApellido": "Admin"
+  }'
+```
+
+### Example Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "username": "admin",
+    "message": "Sistema inicializado correctamente. Puede iniciar sesi\u00f3n con el usuario 'admin'."
+  }
+}
+```
+
+### Error Responses
+
+<ResponseField name="400 Bad Request">
+  System already initialized:
+  ```json
+  {
+    "success": false,
+    "error": "El sistema ya ha sido inicializado."
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="401 Unauthorized">
+  Incorrect bootstrap password:
+  ```json
+  {
+    "success": false,
+    "error": "Contrase\u00f1a de bootstrap incorrecta."
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="400 Bad Request">
+  Weak password:
+  ```json
+  {
+    "success": false,
+    "error": "La contrase\u00f1a debe tener al menos 8 caracteres."
+  }
+  ```
+</ResponseField>
+
+## Bootstrap Workflow
+
+<Steps>
+  <Step title="Check Status">
+    Call GET `/api/bootstrap/status` to verify system needs initialization
+  </Step>
+  <Step title="Prepare Bootstrap">
+    Retrieve `.env` file's `ADMIN_PASSWORD` value
+  </Step>
+  <Step title="Initialize">
+    POST to `/api/bootstrap/init` with bootstrap password and new admin password
+  </Step>
+  <Step title="Login">
+    Use `/api/auth/login` with username "admin" and the new password
+  </Step>
+  <Step title="Configure System">
+    Add more users, configure processes, import production orders
+  </Step>
+</Steps>
+
+## Security Considerations
+
+<Warning>
+**Bootstrap Password Protection**: The `ADMIN_PASSWORD` environment variable should be:
+- Changed from default value before first use
+- Strong and unique (not reused elsewhere)
+- Removed from `.env` after bootstrap completes (optional but recommended)
+- Never committed to version control
+</Warning>
+
+<Check>
+**One-Time Execution**: After bootstrap completes, the `system_config` table is updated:
+
+```sql
+UPDATE system_config SET value = '1' WHERE key = 'bootstrap_completed';
+```
+
+This flag is checked on every bootstrap request, ensuring the operation can never be repeated.
+</Check>
+
+## Resetting Bootstrap
+
+<Warning>
+**Destructive Operation**: Resetting bootstrap should only be done in development or emergency situations.
+</Warning>
+
+If you must reset bootstrap:
+
+```bash
+sqlite3 backend/database/mfcalidad.sqlite "UPDATE system_config SET value = '0' WHERE key = 'bootstrap_completed';"
+```
+
+Then restart the server. This allows running bootstrap again, but does not delete the existing admin user.
+
+## Bootstrap Middleware
+
+From `middlewares/bootstrap.middleware.js`:
+
+```javascript
+module.exports = async (req, res, next) => {
+  // Allow bootstrap endpoints and login to pass through
+  if (req.path.startsWith('/api/bootstrap') || req.path === '/api/auth/login') {
+    return next();
+  }
+
+  // Check if bootstrap completed
+  const completed = await bootstrapRepository.isBootstrapCompleted();
+  
+  if (!completed) {
+    return res.status(403).json({
+      success: false,
+      error: 'Sistema no inicializado. Complete el bootstrap primero.',
+      redirectTo: '/bootstrap.html'
+    });
+  }
+
+  next();
+};
+```
+
+All API endpoints (except bootstrap and login) are blocked until bootstrap completes.
+
+## Best Practices
+
+<Tip>
+**Automated Setup Scripts**: For development environments, create automated bootstrap scripts:
+
+```bash
+# wait for server to start
+sleep 5
+
+# bootstrap system
+curl -X POST http://localhost:3000/api/bootstrap/init \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "bootstrapPassword": "'$ADMIN_PASSWORD'",
+    "newPassword": "dev-admin-123"
+  }'
+```
+</Tip>
+
+<Check>
+**Verify After Bootstrap**: Always verify successful initialization:
+1. Check status endpoint returns `completed: true`
+2. Login with admin credentials
+3. Access protected endpoints
+4. Verify audit log has bootstrap event
+</Check>
+
+## Related Documentation
+
+- [Installation Guide](/installation) - Complete setup instructions
+- [Quickstart](/quickstart) - First-time user guide
+- [User Management](/admin/user-management) - Managing additional users
+- [Authentication API](/api/auth/login) - Login after bootstrap

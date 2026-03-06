@@ -1,0 +1,404 @@
+---
+title: "Paros (Downtime) API"
+description: "Machine downtime tracking and management"
+---
+
+# Paros (Downtime) API
+
+The Paros API manages machine downtime events during production shifts, tracking causes, duration, and impact on production efficiency.
+
+## Authentication
+
+- **Read operations**: `VIEW_PRODUCTION` permission
+- **Write operations**: `MANAGE_PRODUCTION` permission
+
+## Get Downtime by Process
+
+```http
+GET /api/paros?bitacora_id={id}&proceso_id={pid}
+```
+
+**Permission:** `VIEW_PRODUCTION`
+
+Returns all downtime events for a specific process in a shift.
+
+### Query Parameters
+
+<ParamField query="bitacora_id" type="integer" required>
+  Bit\u00e1cora (shift log) ID
+</ParamField>
+
+<ParamField query="proceso_id" type="integer" required>
+  Process ID (1-9)
+</ParamField>
+
+### Response
+
+<ResponseField name="paros" type="array">
+  Array of downtime events
+  <Expandable title="paro properties">
+    <ResponseField name="id" type="integer">
+      Downtime event ID
+    </ResponseField>
+    <ResponseField name="bitacora_id" type="integer">
+      Associated shift log ID
+    </ResponseField>
+    <ResponseField name="proceso_id" type="integer">
+      Process ID
+    </ResponseField>
+    <ResponseField name="maquina_id" type="integer">
+      Affected machine ID (if applicable)
+    </ResponseField>
+    <ResponseField name="tipo_paro_id" type="integer">
+      Downtime type/category ID
+    </ResponseField>
+    <ResponseField name="tipo_paro_nombre" type="string">
+      Downtime type name (e.g., "Mec\u00e1nico", "El\u00e9ctrico", "Falta de material")
+    </ResponseField>
+    <ResponseField name="minutos" type="integer">
+      Duration in minutes
+    </ResponseField>
+    <ResponseField name="descripcion" type="string">
+      Detailed description of the downtime cause
+    </ResponseField>
+    <ResponseField name="hora_inicio" type="string">
+      Start time (HH:MM format)
+    </ResponseField>
+    <ResponseField name="hora_fin" type="string">
+      End time (HH:MM format)
+    </ResponseField>
+    <ResponseField name="registrado_por" type="string">
+      User who recorded the event
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example Request
+
+```bash cURL
+curl -X GET "https://api.example.com/api/paros?bitacora_id=43&proceso_id=2" \\
+  -H "Authorization: Bearer <token>"
+```
+
+### Example Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "paros": [
+      {
+        "id": 101,
+        "bitacora_id": 43,
+        "proceso_id": 2,
+        "maquina_id": 3,
+        "tipo_paro_id": 2,
+        "tipo_paro_nombre": "Mec\u00e1nico",
+        "minutos": 45,
+        "descripcion": "Falla en tensor principal - requiri\u00f3 ajuste y verificaci\u00f3n",
+        "hora_inicio": "10:15",
+        "hora_fin": "11:00",
+        "registrado_por": "Juan P\u00e9rez"
+      },
+      {
+        "id": 102,
+        "bitacora_id": 43,
+        "proceso_id": 2,
+        "maquina_id": 5,
+        "tipo_paro_id": 4,
+        "tipo_paro_nombre": "Falta de material",
+        "minutos": 20,
+        "descripcion": "Espera de lote extrusor - lote anterior agotado",
+        "hora_inicio": "13:00",
+        "hora_fin": "13:20",
+        "registrado_por": "Mar\u00eda L\u00f3pez"
+      }
+    ]
+  }
+}
+```
+
+## Create Downtime Event
+
+```http
+POST /api/paros
+```
+
+**Permission:** `MANAGE_PRODUCTION`
+
+Records a new downtime event.
+
+### Request Body
+
+<ParamField body="bitacora_id" type="integer" required>
+  Bit\u00e1cora (shift log) ID
+</ParamField>
+
+<ParamField body="proceso_id" type="integer" required>
+  Process ID
+</ParamField>
+
+<ParamField body="maquina_id" type="integer">
+  Affected machine ID (optional for process-level downtime)
+</ParamField>
+
+<ParamField body="tipo_paro_id" type="integer" required>
+  Downtime type ID (from motivos catalog)
+</ParamField>
+
+<ParamField body="minutos" type="integer" required>
+  Duration in minutes (must be positive)
+</ParamField>
+
+<ParamField body="descripcion" type="string" required>
+  Detailed description of the downtime cause (minimum 10 characters)
+</ParamField>
+
+<ParamField body="hora_inicio" type="string" required>
+  Start time in HH:MM format (e.g., "10:15")
+</ParamField>
+
+<ParamField body="hora_fin" type="string" required>
+  End time in HH:MM format (e.g., "11:00")
+</ParamField>
+
+### Business Rules
+
+- Total downtime for a shift cannot exceed programmed time (typically 480 minutes for 8-hour shift)
+- hora_fin must be after hora_inicio
+- Calculated duration (hora_fin - hora_inicio) must match minutos field
+- Downtime events are validated during shift closure
+
+### Example Request
+
+```bash cURL
+curl -X POST https://api.example.com/api/paros \\
+  -H "Authorization: Bearer <token>" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "bitacora_id": 43,
+    "proceso_id": 2,
+    "maquina_id": 3,
+    "tipo_paro_id": 1,
+    "minutos": 30,
+    "descripcion": "Falla el\u00e9ctrica en motor principal - requiri\u00f3 reseteo y verificaci\u00f3n",
+    "hora_inicio": "14:00",
+    "hora_fin": "14:30"
+  }'
+```
+
+### Example Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": 103,
+    "mensaje": "Paro registrado correctamente"
+  }
+}
+```
+
+## Update Downtime Event
+
+```http
+PUT /api/paros/:id
+```
+
+**Permission:** `MANAGE_PRODUCTION`
+
+Updates an existing downtime event.
+
+### Path Parameters
+
+<ParamField path="id" type="integer" required>
+  Downtime event ID
+</ParamField>
+
+### Request Body
+
+Same fields as create, all optional. Only provided fields will be updated.
+
+<Warning>
+Cannot update downtime events after shift is closed.
+</Warning>
+
+## Delete Downtime Event
+
+```http
+DELETE /api/paros/:id
+```
+
+**Permission:** `MANAGE_PRODUCTION`
+
+Deletes a downtime event.
+
+### Path Parameters
+
+<ParamField path="id" type="integer" required>
+  Downtime event ID
+</ParamField>
+
+### Business Rules
+
+- Can only delete events from open shifts (estado = ABIERTA)
+- Deletion is logged in audit trail
+- Consider updating instead of deleting for audit purposes
+
+### Example Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "mensaje": "Paro eliminado correctamente"
+  }
+}
+```
+
+## Get Downtime Types
+
+```http
+GET /api/paros/motivos
+```
+
+**Permission:** `VIEW_PRODUCTION`
+
+Returns the catalog of downtime types/categories.
+
+### Response
+
+<ResponseField name="motivos" type="array">
+  Array of downtime type objects
+  <Expandable title="motivo properties">
+    <ResponseField name="id" type="integer">
+      Type ID
+    </ResponseField>
+    <ResponseField name="nombre" type="string">
+      Type name
+    </ResponseField>
+    <ResponseField name="categoria" type="string">
+      Category: Mec\u00e1nico, El\u00e9ctrico, Operacional, Calidad, Externo
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "motivos": [
+      {"id": 1, "nombre": "Falla el\u00e9ctrica", "categoria": "El\u00e9ctrico"},
+      {"id": 2, "nombre": "Falla mec\u00e1nica", "categoria": "Mec\u00e1nico"},
+      {"id": 3, "nombre": "Cambio de orden", "categoria": "Operacional"},
+      {"id": 4, "nombre": "Falta de material", "categoria": "Externo"},
+      {"id": 5, "nombre": "Rechazo de calidad", "categoria": "Calidad"},
+      {"id": 6, "nombre": "Falta de personal", "categoria": "Externo"},
+      {"id": 7, "nombre": "Limpieza/sanitizaci\u00f3n", "categoria": "Operacional"},
+      {"id": 8, "nombre": "Corte de energ\u00eda", "categoria": "Externo"}
+    ]
+  }
+}
+```
+
+## Downtime Analysis
+
+### OEE Calculation
+
+Downtime data feeds into Overall Equipment Effectiveness (OEE) calculations:
+
+```
+Tiempo Disponible = Tiempo Programado - Paros Externos
+Tiempo Operativo = Tiempo Disponible - Paros Internos
+Disponibilidad = Tiempo Operativo / Tiempo Disponible
+```
+
+### Categorization
+
+**Paros Externos** (not counted against machine efficiency):
+- Falta de material
+- Falta de personal  
+- Corte de energ\u00eda
+- Sin \u00f3rdenes programadas
+
+**Paros Internos** (counted against machine efficiency):
+- Fallas mec\u00e1nicas
+- Fallas el\u00e9ctricas
+- Cambios de orden
+- Rechazos de calidad
+- Limpieza operacional
+
+## Integration with Shift Closure
+
+From `bitacora.service.js:45`:
+
+```javascript
+async calcularResumenTiempo(bitacoraId, procesoId) {
+  const status = await this.bitacoraRepository.getProcesoStatus(bitacoraId, procesoId);
+  const tiempoProgramado = status ? status.tiempo_programado_minutos : 480;
+  const totalParos = await this.paroRepository.sumMinutosByBitacoraAndProceso(bitacoraId, procesoId);
+  const tiempoEfectivo = tiempoProgramado - totalParos;
+
+  return {
+    tiempo_programado: tiempoProgramado,
+    total_paros: totalParos,
+    tiempo_efectivo: tiempoEfectivo
+  };
+}
+```
+
+**Closure Validation** (`bitacora.service.js:117`):
+- Total downtime cannot exceed programmed time
+- Negative effective time blocks shift closure
+- All downtime must have valid motivo and description
+
+## Best Practices
+
+<Tip>
+**Real-Time Recording**: Record downtime events as they occur, not at end of shift. This ensures:
+- Accurate time tracking
+- Better root cause analysis
+- Timely response to recurring issues
+</Tip>
+
+<Check>
+**Detailed Descriptions**: Include specific information:
+- Component/system affected
+- Symptoms observed
+- Corrective actions taken
+- Follow-up required
+</Check>
+
+<Warning>
+**Time Validation**: Ensure hora_inicio and hora_fin match actual events. Inaccurate times distort efficiency metrics and prevent effective analysis.
+</Warning>
+
+## Error Responses
+
+<ResponseField name="400 Bad Request">
+  Validation errors:
+  ```json
+  {
+    "success": false,
+    "error": "El tiempo efectivo no puede ser negativo. Total de paros (520 min) excede el tiempo programado (480 min)."
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="404 Not Found">
+  Event not found:
+  ```json
+  {
+    "success": false,
+    "error": "Paro no encontrado."
+  }
+  ```
+</ResponseField>
+
+## Related Endpoints
+
+- [Machines API](/api/operations/maquinas) - Machine status management
+- [Bit\u00e1cora API](/api/production/bitacora) - Shift log management
+- [Telares Downtime](/processes/telares) - Process-specific downtime tracking
