@@ -1,0 +1,494 @@
+---
+title: Working with Shift Logs
+description: Complete workflow for opening, maintaining, and closing shift logs (bitácoras)
+---
+
+Shift logs (bitácoras de turno) are the operational heartbeat of PROD-SYS. They capture all production, quality, and incident data for each shift across all nine production processes.
+
+## Understanding Shifts
+
+PROD-SYS operates on a three-shift schedule:
+
+| Shift | Hours | Operational Date Logic |
+|-------|-------|------------------------|
+| T1 | 07:00 - 15:00 | Same calendar day |
+| T2 | 15:00 - 23:00 | Same calendar day |
+| T3 | 23:00 - 07:00 | Spans two calendar days, assigned to start date |
+
+<Note>
+The **fecha operativa** represents the business day. For T3 (overnight shift), it's the date when the shift started, not when it ends.
+</Note>
+
+## Opening a Shift Log
+
+Navigate to **Producción → Bitácora de Turno**.
+
+<Steps>
+  <Step title="Check System Status">
+    The system detects the current shift based on server time. You'll see:
+    - Current time and date
+    - Calculated shift (T1, T2, or T3)
+    - Operational date
+  </Step>
+  
+  <Step title="Verify No Active Log">
+    Only one shift log can be open at a time. If a log is already active, you'll see the dashboard instead.
+  </Step>
+  
+  <Step title="Open New Log">
+    Click **Abrir Bitácora**. The system:
+    - Auto-fills your username as inspector
+    - Sets turno and fecha_operativa
+    - Flags if opened outside normal shift hours (fuera_de_horario)
+    - Creates the log with estado "ABIERTA"
+  </Step>
+  
+  <Step title="Begin Process Registration">
+    You're redirected to the process dashboard showing all nine production processes.
+  </Step>
+</Steps>
+
+<Warning>
+If you open a log outside normal shift hours (e.g., T1 at 20:00), it's flagged with a warning. This doesn't block operation but is noted in the audit trail.
+</Warning>
+
+## Process Dashboard Overview
+
+The dashboard shows real-time status for all processes:
+
+### Status Indicators
+
+- **⚪ Sin datos**: No data recorded yet
+- **🟡 Esperando Calidad**: Quality samples required before production can be logged
+- **🟡 Esperando Producción**: Production records needed
+- **🟡 Parcial**: Some data recorded, more needed
+- **🔴 Revisión**: Quality rejections or incidents detected
+- **🟢 Completo**: All required data recorded, process ready for closure
+
+### Process Card Information
+
+Each card displays:
+- Process name and ID
+- Current status with icon
+- Next action required
+- Total production quantity (with unit)
+- Quality validation status
+- Last update time
+- Allowed actions
+
+## Recording Process Data
+
+Click on any process card to open the process detail view.
+
+### For Operational Processes
+
+<Steps>
+  <Step title="Navigate to Process">
+    Click the process card (e.g., "2 - Telares").
+  </Step>
+  
+  <Step title="Load Planning Data">
+    The system automatically loads planned orders for this shift from the weekly planning (if configured).
+  </Step>
+  
+  <Step title="Record Quality Samples">
+    Enter quality control measurements:
+    
+    **Required:** Minimum samples per shift (varies by process)
+    
+    For each sample:
+    - Parameter name (e.g., "Ancho", "Espesor")
+    - Measured value with unit
+    - Result: "Cumple", "Rechazo", "No cumple", "En espera"
+    
+    Quality must be validated before production recording.
+  </Step>
+  
+  <Step title="Record Production">
+    After quality validation, log production:
+    
+    For each machine/order combination:
+    - Select the production order
+    - Choose the machine
+    - Enter quantity produced (in process unit)
+    - Record waste (merma_kg) if applicable
+  </Step>
+  
+  <Step title="Add Observations">
+    Include operational notes:
+    - Setup changes
+    - Material issues
+    - Performance notes
+    - Handover information for next shift
+  </Step>
+  
+  <Step title="Save Process Data">
+    Click **Guardar**. The system:
+    - Validates sample counts meet minimum requirements
+    - Checks parameter values against tolerances
+    - Creates/updates línea_ejecucion records
+    - Logs registro_trabajo entries
+    - Updates process status on dashboard
+  </Step>
+</Steps>
+
+### For Non-Operational Processes
+
+If a process didn't run during the shift:
+
+<Steps>
+  <Step title="Mark as Non-Operational">
+    Check the "Proceso No Operativo" box.
+  </Step>
+  
+  <Step title="Provide Reason">
+    Enter the reason:
+    - "Mantenimiento programado"
+    - "Falta de materia prima"
+    - "Sin órdenes asignadas"
+    - "Parada por falla"
+  </Step>
+  
+  <Step title="Save Status">
+    The process is marked complete without requiring quality or production data.
+  </Step>
+</Steps>
+
+## Special Process Workflows
+
+### Extrusor PP (Process 1)
+
+Includes additional structured data:
+
+- **Muestras estructuradas**: Detailed quality metrics specific to extrusion
+- **Parámetros operativos**: Machine settings (temperature zones, pressure, RPM)
+- **Mezcla**: Raw material blend composition with batch numbers
+- **Incidentes**: Inline incident reporting
+
+These are stored in the `parametros` JSON field of registros_trabajo.
+
+### Telares (Process 2)
+
+Supports batch consumption tracking:
+- Select input batches (lotes) consumed by each machine
+- System records consumo_lote_telar entries
+- Links upstream production (Extrusor PP) to weaving process
+
+### Laminado (Process 3)
+
+Generates output batches with custom format:
+- Batch code: `{input_lote_code}-L{correlativo}`
+- Tracks lamination date and operator
+- Links input fabric batches to finished laminated rolls
+
+## Quality Validation Rules
+
+### Process-Specific Parameters
+
+Each process defines valid quality parameters in its contract (see `ProcessRegistry`):
+
+```javascript
+// Example: Telares
+parameters: [
+  { name: 'Ancho', unit: 'cm', min: 90, max: 110 },
+  { name: 'Resistencia', unit: 'N', min: 450 },
+  { name: 'Peso', unit: 'g/m²', min: 80, max: 120 }
+]
+```
+
+### Validation Logic
+
+The system checks:
+1. Parameter name matches process contract
+2. Value is numeric and within tolerance (if defined)
+3. Unit matches expected unit
+4. Minimum sample count is met
+
+### Quality Rejections
+
+If a sample result is "Rechazo", "No cumple", or "En espera":
+- Process status becomes "🔴 Revisión"
+- **Observations become mandatory** (min 10 characters)
+- Shift log will require review approval before closing
+
+## Production Recording
+
+### Línea de Ejecución
+
+The system creates or updates a línea_ejecucion record for each:
+- Production order
+- Process
+- Machine
+
+This establishes the execution context for all production data.
+
+### Registro de Trabajo
+
+For each production entry:
+
+```javascript
+{
+  cantidad_producida: 15000,  // In process unit
+  merma_kg: 45,                // Waste in KG
+  observaciones: "Setup change at 10:30",
+  parametros: JSON.stringify({
+    maquina: "T-03",
+    // Process-specific data...
+  }),
+  linea_ejecucion_id: 123,
+  bitacora_id: 456,
+  maquina_id: 3,
+  usuario_modificacion: "operator1"
+}
+```
+
+### Update vs. Insert
+
+The system uses upsert logic:
+- If a registro_trabajo exists for this línea + bitácora + máquina: **UPDATE**
+- Otherwise: **INSERT**
+
+This prevents duplicate records while allowing corrections.
+
+## Incident Reporting
+
+Incidents can be logged inline during process recording or separately via **Producción → Incidentes**.
+
+<Steps>
+  <Step title="Identify Incident">
+    During production, note any:
+    - Equipment failures
+    - Quality deviations
+    - Safety events
+    - Material defects
+  </Step>
+  
+  <Step title="Record in Process or Separately">
+    - **Extrusor PP**: Use the incidents section in the process form
+    - **Other processes**: Navigate to Incidentes module
+  </Step>
+  
+  <Step title="Provide Details">
+    - Short title (e.g., "Motor bearing failure")
+    - Severity: Baja, Media, Alta
+    - Full description of the problem
+    - Link to línea_ejecucion if applicable
+  </Step>
+  
+  <Step title="Save Incident">
+    Incident is created with estado "abierto".
+  </Step>
+</Steps>
+
+Incidents require closure with corrective action before shift log can be finalized.
+
+## Closure Workflow
+
+### Closure Readiness Check
+
+The dashboard shows "Finalizar y Cerrar Turno" button when:
+- All processes are in "🟢 Completo" or "🔴 Revisión" status
+- No processes have outstanding data requirements
+- Personal assignments exist for all active processes
+
+<Steps>
+  <Step title="Review Process Status">
+    Check the dashboard. All cards should show green or red (revision) status.
+  </Step>
+  
+  <Step title="Verify Personnel Assignments">
+    The system validates that processes with activity have assigned personnel for the shift.
+  </Step>
+  
+  <Step title="Check Time Tracking">
+    For each process:
+    - Tiempo programado: Standard shift duration (480 min)
+    - Total paros: Sum of all recorded downtime
+    - Tiempo efectivo: Must be positive
+    
+    If total paros exceeds tiempo programado, closure is blocked.
+  </Step>
+  
+  <Step title="Click Close Shift">
+    Click **Finalizar y Cerrar Turno**.
+  </Step>
+  
+  <Step title="Review Integrity Checklist">
+    A modal shows:
+    - Production summary by process
+    - Quality validation status
+    - Revision flags (if any)
+  </Step>
+  
+  <Step title="Provide Justification (if needed)">
+    If any process is in "Revisión":
+    - **Observations are mandatory**
+    - Explain rejections, incidents, or deviations
+    - Min 10 characters required
+  </Step>
+  
+  <Step title="Confirm Irreversible Closure">
+    - Check the confirmation box: "Entiendo que este acto es irreversible"
+    - Click **Confirmar Cierre Irreversible**
+  </Step>
+  
+  <Step title="System Finalizes Log">
+    The system:
+    - Sets estado to "CERRADA" or "REVISION" (if issues detected)
+    - Locks all data (read-only)
+    - Logs closure event with username and timestamp
+    - Prevents any further modifications
+  </Step>
+</Steps>
+
+### States After Closure
+
+- **CERRADA**: Clean closure, no issues detected
+- **REVISION**: Closure with quality rejections or incidents requiring supervisor review
+
+### Authorization Rules
+
+- **Inspector (owner)**: Can close their own shift log
+- **Administrador**: Can close any shift log
+- **Supervisor**: Can close any shift log
+- **Operador**: Cannot close shift logs
+
+## Data Inheritance from Previous Shift
+
+PROD-SYS supports "last shift" data loading:
+
+<Steps>
+  <Step title="Open Process Detail">
+    Click on any process card.
+  </Step>
+  
+  <Step title="Load Last Shift">
+    Click **Cargar datos del último turno** (if available).
+  </Step>
+  
+  <Step title="Review Inherited Data">
+    The system loads:
+    - Parámetros operativos (machine settings)
+    - Mezcla (material blend)
+    
+    Production and quality data are NOT inherited.
+  </Step>
+  
+  <Step title="Modify as Needed">
+    Update any values that changed for this shift.
+  </Step>
+</Steps>
+
+This accelerates data entry for stable processes.
+
+## Real-Time Dashboard
+
+The header shows operational context:
+
+- **Turno**: Current shift (T1, T2, T3)
+- **Fecha Operativa**: Business date
+- **Inspector**: Who opened the log
+- **Estado**: ABIERTA, CERRADA, REVISION
+- **Live clock**: Server time
+
+### Process Grid
+
+Sorted by process ID (1-9), each card shows:
+- Status icon and label
+- Next required action
+- Total production
+- Quality status
+- Last update timestamp
+- Clickable to drill into detail
+
+## Best Practices
+
+<Check>Open the shift log at the start of your shift to capture accurate timestamps</Check>
+<Check>Record quality samples before starting production to validate process stability</Check>
+<Check>Enter observations throughout the shift, not just at closing</Check>
+<Check>Mark non-operational processes early to avoid closure warnings</Check>
+<Check>Review all process cards before attempting closure</Check>
+<Check>Provide detailed justifications for any quality rejections</Check>
+
+<Warning>Never open multiple shift logs simultaneously. The system enforces single active log.</Warning>
+
+## Troubleshooting
+
+### Cannot Open Shift Log
+
+**Error**: "Ya existe una bitácora abierta"
+
+- Another log is currently open
+- Check if previous shift forgot to close
+- Supervisor/Admin can force close previous log
+
+### Cannot Save Process Data
+
+**Error**: "No se puede registrar producción hasta validar calidad"
+
+- Quality validation is required first
+- Enter minimum samples for the process
+- All samples must have results
+
+### Cannot Close Shift
+
+**Error**: "El proceso X tiene actividad pero no cuenta con personal asignado"
+
+- Assign personnel to the process for this shift
+- Navigate to **Administración → Personal**
+- Ensure grupo de trabajo has this process enabled
+
+**Error**: "El proceso X tiene un exceso de tiempo de paro"
+
+- Recorded downtime exceeds shift duration
+- Review paro records in the process
+- Correct any data entry errors
+
+### Process Shows "Esperando Calidad"
+
+- Minimum sample count not met
+- Check process contract for muestrasMinTurno value
+- Enter additional quality samples
+
+## Audit Trail
+
+All shift log operations are audited:
+
+- **Open**: Timestamp, inspector, shift, fecha_operativa
+- **Process updates**: Before/after data snapshots
+- **Status changes**: ABIERTA → CERRADA/REVISION
+- **Closure justifications**: Full text of observations
+- **Authorization**: Username of closer (may differ from inspector)
+
+Access the audit log at **Administración → Auditoría**, filter by entity "Bitacora".
+
+## Integration Points
+
+### Planning Service
+
+If configured, shift logs inherit planned orders:
+- System queries `planningService.getPlanningForShift(fecha, turno, proceso)`
+- Pre-populates expected orders
+- Operators confirm or adjust actual production
+
+### Batch Generation
+
+Production recorded in shift logs automatically generates batches (lotes):
+- One batch per order + bitácora combination
+- Format: `{codigo_orden}-{correlativo}`
+- Estado: "activo"
+- Linked to traceability chain
+
+### Time Tracking
+
+Downtime (paros) recorded during the shift:
+- Linked to bitácora + proceso
+- Summed for effective time calculation
+- Must not exceed programmed time
+
+## Related Topics
+
+- [Production Orders](/guides/production-orders) - Orders being executed
+- [Incidents](/guides/incidents) - Reporting and managing production incidents
+- [Quality Batches](/guides/quality-batches) - Output batch generation
+- [Traceability](/guides/traceability) - Following production through shifts

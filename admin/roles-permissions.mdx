@@ -1,0 +1,730 @@
+---
+title: 'Roles & Permissions'
+description: 'Understanding PROD-SYS role-based access control and permission model'
+icon: 'shield'
+---
+
+## Overview
+
+PROD-SYS implements a role-based access control (RBAC) system where:
+
+1. **Users** are assigned **System Roles** (Administrador, Inspector, Supervisor, etc.)
+2. **Roles** have **Permissions** (MANAGE_STAFF, VIEW_PRODUCTION, etc.)
+3. **Permissions** gate access to API endpoints and system features
+4. **Authorization checks** occur on every authenticated request
+
+## Permission Model
+
+### Permission Categories
+
+Permissions are organized by functional domain:
+
+#### Personnel & Users
+
+| Permission | Description | Grants Access To |
+|------------|-------------|------------------|
+| `VIEW_STAFF` | View personnel information | GET /api/personnel/personal, GET /api/personnel/personal/:id |
+| `MANAGE_STAFF` | Full personnel management | POST /api/personnel/personal, PUT /api/personnel/personal/:id, password reset, role assignment |
+
+#### Production
+
+| Permission | Description | Grants Access To |
+|------------|-------------|------------------|
+| `VIEW_PRODUCTION` | View production data | GET production orders, shift logs, work records |
+| `MANAGE_PRODUCTION` | Create/edit production records | POST/PUT production data, register work |
+| `ASSIGN_OPERATIONS` | Assign personnel to machines | POST /api/personnel/personal/:id/asignar-operacion |
+
+#### Quality
+
+| Permission | Description | Grants Access To |
+|------------|-------------|------------------|
+| `VIEW_QUALITY` | View quality data | GET samples, defects, quality inspections |
+| `MANAGE_QUALITY` | Record quality data | POST/PUT quality records, sample results |
+
+#### Machines
+
+| Permission | Description | Grants Access To |
+|------------|-------------|------------------|
+| `VIEW_MACHINES` | View machine information | GET /api/maquinas |
+| `MANAGE_MACHINES` | Manage machine configuration | POST/PUT machine status, configuration |
+
+#### System
+
+| Permission | Description | Grants Access To |
+|------------|-------------|------------------|
+| `VIEW_AUDIT` | Access audit logs | GET /api/auditoria |
+| `VIEW_PROCESSES` | View process definitions | GET process catalogs |
+
+**Location**: `backend/shared/auth/permissions.js:1-22`
+
+## System Roles
+
+### Role Definitions
+
+#### Administrador
+
+**Access Level**: Full system access
+
+**Permissions**: All permissions (wildcard)
+
+**Use Cases**:
+- System configuration
+- User account management
+- Access to all modules
+- Audit log review
+- Emergency overrides
+
+**Assignment**: Only for IT staff and executive management
+
+```javascript
+'Administrador': Object.values(PERMISSIONS)
+```
+
+**Location**: `backend/shared/auth/permissions.js:25`
+
+---
+
+#### Inspector
+
+**Access Level**: Full operational access (except system config)
+
+**Permissions**:
+- `VIEW_STAFF`, `MANAGE_STAFF`
+- `VIEW_PRODUCTION`, `MANAGE_PRODUCTION`
+- `VIEW_QUALITY`, `MANAGE_QUALITY`
+- `VIEW_MACHINES`, `MANAGE_MACHINES`
+- `VIEW_PROCESSES`
+- `VIEW_AUDIT`
+
+**Use Cases**:
+- Quality department supervisors
+- Shift inspectors with full authority
+- Production coordinators
+- Personnel management for their area
+
+**Cannot**:
+- Modify system configuration
+- Create/delete roles
+- Access low-level system settings
+
+**Location**: `backend/shared/auth/permissions.js:26-37`
+
+---
+
+#### Supervisor
+
+**Access Level**: Production oversight and personnel assignment
+
+**Permissions**:
+- `VIEW_STAFF`
+- `VIEW_PRODUCTION`
+- `ASSIGN_OPERATIONS`
+- `VIEW_QUALITY`
+- `VIEW_MACHINES`
+- `VIEW_PROCESSES`
+
+**Use Cases**:
+- Shift supervisors
+- Team leaders
+- Assigning operators to machines
+- Monitoring production progress
+
+**Cannot**:
+- Register or modify personnel data
+- Edit quality records
+- Change machine configuration
+- Access audit logs
+
+**Location**: `backend/shared/auth/permissions.js:38-45`
+
+---
+
+#### Jefe de Operaciones
+
+**Access Level**: Operations management
+
+**Permissions**:
+- `VIEW_STAFF`, `MANAGE_STAFF`
+- `VIEW_PRODUCTION`
+- `VIEW_QUALITY`
+- `VIEW_MACHINES`, `MANAGE_MACHINES`
+- `VIEW_PROCESSES`
+
+**Use Cases**:
+- Operations managers
+- Plant engineers
+- Maintenance coordinators
+- Machine configuration
+
+**Cannot**:
+- Assign day-to-day operations
+- Edit production or quality records directly
+- Access audit logs
+
+**Location**: `backend/shared/auth/permissions.js:46-54`
+
+---
+
+#### Gerencia
+
+**Access Level**: Executive read-only access
+
+**Permissions**:
+- `VIEW_STAFF`
+- `VIEW_PRODUCTION`
+- `VIEW_QUALITY`
+- `VIEW_MACHINES`
+- `VIEW_AUDIT`
+- `VIEW_PROCESSES`
+
+**Use Cases**:
+- Executive management
+- Business intelligence access
+- Compliance review
+- Strategic planning
+
+**Cannot**:
+- Make any system changes
+- Create or edit any records
+- Manage personnel or operations
+
+**Location**: `backend/shared/auth/permissions.js:55-62`
+
+---
+
+#### Operario
+
+**Access Level**: Production floor operators
+
+**Permissions**:
+- `VIEW_PRODUCTION`
+- `MANAGE_PRODUCTION`
+
+**Use Cases**:
+- Machine operators
+- Production line workers
+- Recording work output
+- Shift data entry
+
+**Cannot**:
+- View or manage personnel
+- Configure machines
+- Assign operations
+- Access quality module (except recording during production)
+
+**Location**: `backend/shared/auth/permissions.js:63-66`
+
+## Authorization Flow
+
+### Middleware Stack
+
+Every protected endpoint uses this middleware chain:
+
+```javascript
+router.get('/api/personnel/personal',
+  authMiddleware,              // 1. Verify JWT and session
+  authorize(PERMISSIONS.VIEW_STAFF),  // 2. Check permission
+  controller.getAllStaff       // 3. Execute handler
+);
+```
+
+### 1. Authentication Middleware
+
+**File**: `backend/middlewares/auth.middleware.js`
+
+**Process**:
+
+1. **Development Bypass** (if `DISABLE_AUTH_CHECKS=true`):
+   ```javascript
+   if (process.env.DISABLE_AUTH_CHECKS === 'true') {
+     req.user = { id: 1, usuario_id: 1, username: 'admin', rol: 'Administrador' };
+     return next();
+   }
+   ```
+
+2. **Token Extraction**:
+   - Check `Authorization: Bearer <token>` header
+   - Fallback to `token` cookie
+
+3. **Token Verification**:
+   - Verify JWT signature with `JWT_SECRET`
+   - Extract user payload (id, username, role)
+
+4. **Real-time Status Check**:
+   ```javascript
+   const user = await sqlite.get(
+     'SELECT estado_usuario FROM usuarios WHERE id = ?',
+     [decoded.usuario_id]
+   );
+   
+   if (!user || user.estado_usuario !== 'Activo') {
+     return next(new ForbiddenError('Su cuenta ha sido desactivada'));
+   }
+   ```
+
+5. **Attach to Request**:
+   ```javascript
+   req.user = decoded;  // Available in all downstream handlers
+   ```
+
+**Location**: `backend/middlewares/auth.middleware.js:8-53`
+
+### 2. Authorization Middleware
+
+**File**: `backend/middlewares/authorize.js`
+
+**Function Signature**:
+```javascript
+const authorize = (...requirements) => {
+  return (req, res, next) => {
+    // Authorization logic
+  };
+};
+```
+
+**Process**:
+
+1. **Verify Authentication**:
+   ```javascript
+   if (!req.user) {
+     return next(new UnauthorizedError('Usuario no autenticado'));
+   }
+   ```
+
+2. **Development Bypass** (if `DISABLE_AUTH_CHECKS=true`):
+   ```javascript
+   if (process.env.DISABLE_AUTH_CHECKS === 'true') {
+     return next();  // Skip permission checks
+   }
+   ```
+
+3. **Permission Check**:
+   ```javascript
+   const userRole = req.user.rol;
+   
+   const isAuthorized = requirements.some(reqmt => {
+     // Direct role match
+     if (reqmt === userRole) return true;
+     
+     // Admin alias
+     if (reqmt === 'ADMIN' && userRole === 'Administrador') return true;
+     
+     // Permission check via role mapping
+     if (hasPermission(userRole, reqmt)) return true;
+     
+     return false;
+   });
+   ```
+
+4. **Enforce or Deny**:
+   ```javascript
+   if (!isAuthorized) {
+     return next(new ForbiddenError('No tiene permisos para realizar esta acción'));
+   }
+   
+   next();  // Authorized, proceed to handler
+   ```
+
+**Location**: `backend/middlewares/authorize.js:9-41`
+
+### Permission Resolution
+
+**Helper Function**: `hasPermission(role, permission)`
+
+```javascript
+const hasPermission = (role, permission) => {
+  if (!role || !permission) return false;
+  
+  const permissions = ROLE_PERMISSIONS[role] || [];
+  return permissions.includes(permission);
+};
+```
+
+**Lookup**: `ROLE_PERMISSIONS` object maps role names to permission arrays
+
+**Location**: `backend/shared/auth/permissions.js:69-73`
+
+## Development Mode
+
+### Disabling Authorization
+
+**Environment Variable**: `DISABLE_AUTH_CHECKS=true`
+
+**Effect**:
+- Authentication middleware injects admin user automatically
+- Authorization middleware always grants access
+- All users effectively have `Administrador` role
+
+**Use Cases**:
+- Local development (faster iteration)
+- Integration testing (avoid auth setup)
+- System bootstrapping (first-time setup)
+
+**Location**: 
+- `backend/middlewares/auth.middleware.js:9-12`
+- `backend/middlewares/authorize.js:21-23`
+
+<Danger>
+  **NEVER** deploy to production with `DISABLE_AUTH_CHECKS=true`. This completely bypasses all security controls.
+</Danger>
+
+### Enabling Authorization
+
+**In Production**:
+```bash
+# .env
+DISABLE_AUTH_CHECKS=false
+NODE_ENV=production
+```
+
+**Effect**:
+- Full RBAC enforcement
+- Real user authentication required
+- Permission checks active on every request
+
+## API Protection Examples
+
+### Personnel Management
+
+```javascript
+// backend/domains/personal/personal.routes.js
+
+// View personnel list - requires VIEW_STAFF
+router.get('/', 
+  authMiddleware, 
+  authorize(PERMISSIONS.VIEW_STAFF),
+  controller.getAllStaff
+);
+
+// Register new personnel - requires MANAGE_STAFF
+router.post('/',
+  authMiddleware,
+  authorize(PERMISSIONS.MANAGE_STAFF),
+  controller.registerStaff
+);
+
+// Assign role - requires MANAGE_STAFF
+router.post('/:id/asignar-rol',
+  authMiddleware,
+  authorize(PERMISSIONS.MANAGE_STAFF),
+  controller.assignRole
+);
+
+// Assign to operation - requires ASSIGN_OPERATIONS
+router.post('/:id/asignar-operacion',
+  authMiddleware,
+  authorize(PERMISSIONS.ASSIGN_OPERATIONS),
+  controller.assignOperation
+);
+```
+
+### Audit Logs
+
+```javascript
+// backend/shared/audit/audit.routes.js
+
+router.get('/',
+  authMiddleware,
+  authorize(PERMISSIONS.VIEW_AUDIT),  // Only Administrador, Inspector, Gerencia
+  async (req, res, next) => {
+    const { usuario, entidad, fecha } = req.query;
+    const logs = await auditService.getAll({ usuario, entidad, fecha });
+    return sendSuccess(res, logs);
+  }
+);
+```
+
+**Location**: `backend/shared/audit/audit.routes.js:14-26`
+
+### Authentication Endpoints
+
+```javascript
+// backend/domains/auth/auth.routes.js
+
+// Login - no authentication required (public)
+router.post('/login', controller.login);
+
+// Change password - authentication required, no specific permission
+router.post('/change-password',
+  authMiddleware,  // Only verify user is logged in
+  controller.changePassword
+);
+```
+
+## Role Management
+
+### Viewing Roles
+
+**Endpoint**: `GET /api/personnel/personal/catalogos`
+
+**Permission**: `VIEW_STAFF`
+
+**Returns**:
+```json
+{
+  "success": true,
+  "data": {
+    "areas": [
+      { "id": 1, "nombre": "Producción" },
+      { "id": 2, "nombre": "Departamento de Calidad" }
+    ],
+    "roles": [
+      { "id": 1, "nombre": "Inspector" },
+      { "id": 2, "nombre": "Supervisor" },
+      { "id": 6, "nombre": "Administrador" }
+    ]
+  }
+}
+```
+
+**Location**: `backend/domains/personal/personal.service.js:235-239`
+
+### Assigning Roles
+
+**Endpoint**: `POST /api/personnel/personal/:id/asignar-rol`
+
+**Permission**: `MANAGE_STAFF`
+
+**Request**:
+```json
+{
+  "rol_id": 2,
+  "motivo_cambio": "Promoción a Supervisor de Turno",
+  "es_correccion": false
+}
+```
+
+**Process**:
+1. Updates `usuarios.rol_id`
+2. Creates history entry in `persona_roles` table
+3. Logs to audit trail with `ROLE_CHANGE` action
+4. New permissions take effect on user's next request
+
+**Location**: `backend/domains/personal/personal.service.js:241-270`
+
+### Role History
+
+Role assignments are tracked in `persona_roles` table:
+
+```sql
+CREATE TABLE persona_roles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  persona_id INTEGER NOT NULL,
+  rol_id INTEGER NOT NULL,
+  fecha_asignacion DATETIME DEFAULT CURRENT_TIMESTAMP,
+  asignado_por INTEGER,
+  activo BOOLEAN DEFAULT 1,
+  motivo_cambio TEXT,
+  FOREIGN KEY (persona_id) REFERENCES personas(id),
+  FOREIGN KEY (rol_id) REFERENCES roles(id),
+  FOREIGN KEY (asignado_por) REFERENCES personas(id)
+);
+```
+
+**Location**: `backend/database/sqlite.js:1115-1126`
+
+## Adding New Permissions
+
+### 1. Define Permission Constant
+
+```javascript
+// backend/shared/auth/permissions.js
+
+const PERMISSIONS = {
+  // Existing permissions...
+  
+  // New permission
+  MANAGE_REPORTS: 'MANAGE_REPORTS',
+};
+```
+
+### 2. Assign to Roles
+
+```javascript
+const ROLE_PERMISSIONS = {
+  'Administrador': Object.values(PERMISSIONS),  // Gets it automatically
+  
+  'Inspector': [
+    // Existing permissions...
+    PERMISSIONS.MANAGE_REPORTS,  // Add explicitly
+  ],
+  
+  'Gerencia': [
+    // Gerencia only views
+  ]
+};
+```
+
+### 3. Protect Endpoints
+
+```javascript
+// In your route file
+const { PERMISSIONS } = require('../../shared/auth/permissions');
+const authorize = require('../../middlewares/authorize');
+
+router.post('/api/reports/generate',
+  authMiddleware,
+  authorize(PERMISSIONS.MANAGE_REPORTS),
+  controller.generateReport
+);
+```
+
+## Adding New Roles
+
+### 1. Add to Database
+
+```sql
+INSERT INTO roles (nombre) VALUES ('Analista de Datos');
+```
+
+### 2. Define Permissions
+
+```javascript
+// backend/shared/auth/permissions.js
+
+const ROLE_PERMISSIONS = {
+  // Existing roles...
+  
+  'Analista de Datos': [
+    PERMISSIONS.VIEW_STAFF,
+    PERMISSIONS.VIEW_PRODUCTION,
+    PERMISSIONS.VIEW_QUALITY,
+    PERMISSIONS.VIEW_AUDIT,
+    PERMISSIONS.MANAGE_REPORTS
+  ]
+};
+```
+
+### 3. Assign to Users
+
+Use the standard role assignment endpoint:
+
+```bash
+curl -X POST http://localhost:3000/api/personnel/personal/5/asignar-rol \
+  -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rol_id": 7,
+    "motivo_cambio": "Asignación a nuevo rol de Analista de Datos"
+  }'
+```
+
+## Security Best Practices
+
+### Principle of Least Privilege
+
+<Check>
+  - [ ] Assign the minimum role required for job function
+  - [ ] Use `Operario` for production floor staff
+  - [ ] Reserve `Administrador` for IT and executive management only
+  - [ ] Prefer read-only roles (`Gerencia`) for reporting needs
+  - [ ] Review role assignments quarterly
+</Check>
+
+### Separation of Duties
+
+<Check>
+  - [ ] Different users for data entry vs. approval
+  - [ ] Separate quality inspection from production recording
+  - [ ] Limit `MANAGE_STAFF` permission to HR and management
+  - [ ] Restrict `VIEW_AUDIT` to compliance and leadership
+</Check>
+
+### Role Assignment Hygiene
+
+<Check>
+  - [ ] Always provide `motivo_cambio` when assigning roles
+  - [ ] Use `es_correccion` flag for error fixes
+  - [ ] Review audit logs for unauthorized role escalations
+  - [ ] Remove permissions immediately upon job change
+  - [ ] Disable accounts when personnel leave
+</Check>
+
+### Development vs Production
+
+<Check>
+  - [ ] **Never** use `DISABLE_AUTH_CHECKS=true` in production
+  - [ ] Test permission enforcement before deploying
+  - [ ] Verify role mappings after permission changes
+  - [ ] Use separate admin accounts for production
+  - [ ] Log all permission-related configuration changes
+</Check>
+
+## Troubleshooting
+
+### 403 Forbidden Errors
+
+**Symptoms**: User is authenticated but cannot access endpoint
+
+**Check**:
+
+1. **User's Current Role**:
+   ```sql
+   SELECT u.username, r.nombre as rol
+   FROM usuarios u
+   JOIN roles r ON u.rol_id = r.id
+   WHERE u.username = 'username';
+   ```
+
+2. **Required Permission**:
+   - Check route definition for `authorize(...)` parameter
+   - Example: `authorize(PERMISSIONS.MANAGE_STAFF)`
+
+3. **Role Permission Mapping**:
+   ```javascript
+   // In backend/shared/auth/permissions.js
+   console.log(ROLE_PERMISSIONS['Inspector']);
+   // Should include required permission
+   ```
+
+4. **Development Mode**:
+   ```bash
+   # Check .env
+   DISABLE_AUTH_CHECKS=true  # Should be false in production
+   ```
+
+### Permission Changes Not Taking Effect
+
+**Cause**: User's JWT token contains cached role information
+
+**Solution**: 
+1. User must log out and log back in
+2. New JWT will contain updated role
+3. Permissions checked fresh on each request
+
+**Alternative**: Implement token revocation mechanism (not currently in system)
+
+### Unauthorized Despite Correct Role
+
+**Check**:
+
+1. **Token Validity**:
+   - Verify `JWT_SECRET` hasn't changed
+   - Check token expiration (8 hours)
+   - Inspect token payload: `jwt.io`
+
+2. **Account Status**:
+   ```sql
+   SELECT estado_usuario FROM usuarios WHERE id = ?;
+   ```
+   - Must be `Activo`
+
+3. **Persona Status**:
+   ```sql
+   SELECT estado_laboral FROM personas WHERE id = ?;
+   ```
+   - Must be `Activo` (not Incapacitado, Inactivo, or Baja)
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="User Management" icon="users" href="/admin/user-management">
+    Creating and managing user accounts
+  </Card>
+  <Card title="Audit Logs" icon="list" href="/admin/audit-logs">
+    Tracking role assignments and access
+  </Card>
+  <Card title="Configuration" icon="gear" href="/admin/configuration">
+    Security settings and environment variables
+  </Card>
+</CardGroup>

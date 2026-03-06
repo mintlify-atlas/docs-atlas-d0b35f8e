@@ -1,0 +1,360 @@
+---
+title: "Login"
+api: "POST /api/auth/login"
+description: "Authenticate a user and receive an access token"
+---
+
+## Overview
+
+Authenticates a user with username and password credentials. On successful authentication, returns a JWT access token and sets an HTTP-only cookie for browser-based sessions.
+
+### Security Features
+
+- **Rate Limiting**: Maximum 5 login attempts per IP address within a 15-minute window
+- **Account Lockout**: Account is automatically locked after 5 consecutive failed login attempts
+- **Timing Attack Protection**: Response time is normalized to at least 300ms to prevent user enumeration
+- **System Status Check**: Login is only permitted when the system is in `INICIALIZADO` state
+- **Employee Status Validation**: Access is denied for employees with labor status of `Baja`, `Incapacitado`, or `Inactivo`
+
+## Authentication
+
+<Info>This endpoint does NOT require authentication.</Info>
+
+## Request
+
+### Body Parameters
+
+<ParamField body="username" type="string" required>
+  User's username for authentication.
+  
+  **Validation**: Must be at least 3 characters long.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  User's password.
+  
+  **Validation**: Must be at least 5 characters long.
+</ParamField>
+
+### Request Example
+
+```bash
+curl -X POST https://api.example.com/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "jdoe",
+    "password": "securePassword123"
+  }'
+```
+
+## Response
+
+### Success Response (200 OK)
+
+<ResponseField name="success" type="boolean">
+  Always `true` for successful responses.
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  Contains the authentication result.
+  
+  <Expandable title="data properties">
+    <ResponseField name="token" type="string">
+      JWT access token valid for 8 hours. Use this token in the `Authorization` header for authenticated requests.
+    </ResponseField>
+    
+    <ResponseField name="user" type="object">
+      Authenticated user information.
+      
+      <Expandable title="user properties">
+        <ResponseField name="id" type="number | null">
+          Person ID from the `personas` table. `null` for technical admin users.
+        </ResponseField>
+        
+        <ResponseField name="usuario_id" type="number">
+          User ID from the `usuarios` table.
+        </ResponseField>
+        
+        <ResponseField name="username" type="string">
+          Username used for authentication.
+        </ResponseField>
+        
+        <ResponseField name="rol" type="string">
+          User role. Possible values: `Administrador`, `Supervisor`, `Operador`, `Calidad`.
+        </ResponseField>
+        
+        <ResponseField name="nombre" type="string">
+          Full name of the user. Returns "Administrador de Sistema" for technical admin users without a linked person.
+        </ResponseField>
+        
+        <ResponseField name="must_change_password" type="boolean">
+          Indicates whether the user must change their password on next login.
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="error" type="null">
+  Always `null` for successful responses.
+</ResponseField>
+
+#### Example Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTIzLCJ1c3VhcmlvX2lkIjo0NSwidXNlcm5hbWUiOiJqZG9lIiwicm9sIjoiT3BlcmFkb3IiLCJub21icmUiOiJKdWFuIFDDqXJleiIsIm11c3RfY2hhbmdlX3Bhc3N3b3JkIjpmYWxzZSwiaWF0IjoxNzA5NTYyMDAwLCJleHAiOjE3MDk1OTA4MDB9.xYz123...",
+    "user": {
+      "id": 123,
+      "usuario_id": 45,
+      "username": "jdoe",
+      "rol": "Operador",
+      "nombre": "Juan Pérez",
+      "must_change_password": false
+    }
+  },
+  "error": null
+}
+```
+
+#### Cookie Response
+
+The server also sets an HTTP-only cookie named `token` with the following properties:
+
+- **Name**: `token`
+- **Value**: JWT access token (same as response body)
+- **HttpOnly**: `true`
+- **Secure**: `true` (in production)
+- **SameSite**: `Strict`
+- **Max-Age**: 8 hours (28,800 seconds)
+
+## Error Responses
+
+### 400 Bad Request - Validation Error
+
+Returned when request body fails validation.
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": "username: El usuario debe tener al menos 3 caracteres"
+}
+```
+
+### 401 Unauthorized - System Not Initialized
+
+Returned when attempting to login before system initialization.
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": "El sistema requiere inicialización antes de permitir el acceso."
+}
+```
+
+### 401 Unauthorized - Invalid Credentials
+
+Returned when username or password is incorrect. Generic message prevents user enumeration.
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": "Credenciales inválidas"
+}
+```
+
+<Note>
+  After 5 failed login attempts, the account is automatically locked. Subsequent login attempts will return the "Account Locked" error.
+</Note>
+
+### 401 Unauthorized - Account Locked
+
+Returned when the account has been locked due to excessive failed login attempts.
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": "Cuenta bloqueada por seguridad. Contacte al administrador."
+}
+```
+
+### 401 Unauthorized - Employee Terminated
+
+Returned when the employee's labor status is `Baja` (terminated).
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": "Acceso denegado: cuenta dada de baja."
+}
+```
+
+### 401 Unauthorized - Employee Unavailable
+
+Returned when the employee's labor status is `Incapacitado` (incapacitated) or `Inactivo` (inactive).
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": "Acceso denegado: colaborador con ausencia activa."
+}
+```
+
+### 401 Unauthorized - Account Inactive
+
+Returned when the user account status is not `Activo`.
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": "Acceso denegado: Cuenta en estado [estado_usuario]"
+}
+```
+
+### 429 Too Many Requests - Rate Limit Exceeded
+
+Returned when too many login requests are made from the same IP address.
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": "Too many login attempts. Please try again later."
+}
+```
+
+## Implementation Details
+
+### Source Code References
+
+- **Route**: `/workspace/source/backend/domains/auth/auth.routes.js:21`
+- **Controller**: `/workspace/source/backend/domains/auth/auth.controller.js:13`
+- **Service**: `/workspace/source/backend/domains/auth/auth.service.js:22`
+- **Validation**: `/workspace/source/backend/domains/auth/auth.validation.js:4`
+
+### Login Flow
+
+1. **Rate Limit Check**: Request is validated against login rate limiter (configured separately)
+2. **Request Validation**: Username and password are validated using Zod schema
+3. **System Status Check**: Verifies system is in `INICIALIZADO` state
+4. **User Lookup**: Searches for user by username
+5. **Employee Status Check**: If user has `persona_id`, validates employee labor status
+6. **Account Lock Check**: Verifies account is not locked (`bloqueado_at` is null)
+7. **Password Verification**: Compares provided password with stored bcrypt hash
+8. **Timing Normalization**: Ensures response takes at least 300ms (timing attack mitigation)
+9. **Failed Attempt Tracking**: On failure, increments `intentos_fallidos` counter and locks account after 5 attempts
+10. **Success Response**: On success, resets `intentos_fallidos` to 0, generates JWT token, and returns user data
+
+### Token Generation
+
+The JWT token includes the following payload:
+
+```javascript
+{
+  id: user.persona_id,           // Person ID or null
+  usuario_id: user.id,            // User table ID
+  username: user.username,        // Username
+  rol: user.rol,                  // User role
+  nombre: "Full Name",            // Display name
+  must_change_password: false,    // Password change requirement
+  iat: 1709562000,               // Issued at timestamp
+  exp: 1709590800                // Expiration timestamp (8 hours)
+}
+```
+
+<Warning>
+  The token is valid for 8 hours. After expiration, the user must re-authenticate.
+</Warning>
+
+## Usage Examples
+
+### JavaScript (Fetch API)
+
+```javascript
+const login = async (username, password) => {
+  try {
+    const response = await fetch('https://api.example.com/api/auth/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ username, password }),
+      credentials: 'include', // Include cookies
+    });
+    
+    const data = await response.json();
+    
+    if (!data.success) {
+      throw new Error(data.error);
+    }
+    
+    // Store token for subsequent requests
+    localStorage.setItem('token', data.data.token);
+    
+    return data.data;
+  } catch (error) {
+    console.error('Login failed:', error.message);
+    throw error;
+  }
+};
+
+// Usage
+login('jdoe', 'securePassword123')
+  .then(({ token, user }) => {
+    console.log('Logged in as:', user.nombre);
+    console.log('Role:', user.rol);
+  });
+```
+
+### Python (requests)
+
+```python
+import requests
+
+def login(username, password):
+    url = 'https://api.example.com/api/auth/login'
+    payload = {
+        'username': username,
+        'password': password
+    }
+    
+    response = requests.post(url, json=payload)
+    data = response.json()
+    
+    if not data['success']:
+        raise Exception(data['error'])
+    
+    return data['data']
+
+# Usage
+try:
+    result = login('jdoe', 'securePassword123')
+    token = result['token']
+    user = result['user']
+    print(f"Logged in as: {user['nombre']}")
+    print(f"Role: {user['rol']}")
+except Exception as e:
+    print(f"Login failed: {e}")
+```
+
+### Using the Token
+
+After successful login, include the token in the `Authorization` header for authenticated requests:
+
+```bash
+curl -X GET https://api.example.com/api/ordenes-produccion \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+<Tip>
+  The system supports both Bearer token authentication and cookie-based authentication. For browser-based applications, the HTTP-only cookie is automatically included in requests to the same domain.
+</Tip>

@@ -1,0 +1,597 @@
+---
+title: 'Get Order Dashboard'
+api: 'GET /api/dashboard/orden/:id'
+description: 'Retrieve comprehensive dashboard data for a specific production order including execution lines, work records, production batches, and quality samples'
+---
+
+Provides a complete operational view of a production order with all associated execution data, traceability information, and quality control metrics. This endpoint returns deeply nested data structures that map the entire production chain for a specific order.
+
+## Path Parameters
+
+<ParamField path="id" type="integer" required>
+  The unique identifier of the production order
+</ParamField>
+
+## Response
+
+Returns a 404 error if the order is not found.
+
+<ResponseField name="orden_produccion" type="object" required>
+  Complete production order details
+  
+  <Expandable title="Order Object">
+    <ResponseField name="id" type="integer" required>
+      Unique production order identifier
+    </ResponseField>
+    
+    <ResponseField name="codigo_orden" type="string" required>
+      Production order code (unique identifier)
+    </ResponseField>
+    
+    <ResponseField name="producto" type="string" required>
+      Product name or description
+    </ResponseField>
+    
+    <ResponseField name="cantidad_objetivo" type="number" required>
+      Target production quantity
+    </ResponseField>
+    
+    <ResponseField name="unidad" type="string" required>
+      Unit of measurement (e.g., "Unidades", "kg", "metros")
+    </ResponseField>
+    
+    <ResponseField name="fecha_planificada" type="string" required>
+      Planned production date (ISO 8601 format)
+    </ResponseField>
+    
+    <ResponseField name="prioridad" type="string" required>
+      Priority level: "Alta", "Media", or "Baja"
+    </ResponseField>
+    
+    <ResponseField name="observaciones" type="string">
+      Additional notes or observations
+    </ResponseField>
+    
+    <ResponseField name="estado" type="string" required>
+      Current order status: "Creada", "Liberada", "En producción", "Pausada", "Cerrada", or "Cancelada"
+    </ResponseField>
+    
+    <ResponseField name="fecha_creacion" type="string" required>
+      Order creation date (ISO 8601 format)
+    </ResponseField>
+    
+    <ResponseField name="especificaciones" type="string">
+      JSON string containing product specifications and technical requirements
+    </ResponseField>
+    
+    <ResponseField name="motivo_cierre" type="string">
+      Reason for closing the order (if applicable)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="lineas_ejecucion" type="array" required>
+  Array of execution lines representing work performed for this order across different processes and machines
+  
+  <Expandable title="Execution Line Object">
+    <ResponseField name="id" type="integer" required>
+      Unique execution line identifier
+    </ResponseField>
+    
+    <ResponseField name="estado" type="string" required>
+      Execution line status: "ACTIVA", "PAUSADA", "COMPLETADA", or "CANCELADA"
+    </ResponseField>
+    
+    <ResponseField name="orden_produccion_id" type="integer" required>
+      Reference to the parent production order
+    </ResponseField>
+    
+    <ResponseField name="proceso_id" type="integer" required>
+      Process type identifier (e.g., 1=Telar, 2=Laminado, 3=Impresión, 4=Conversión, 5=Vestidos)
+    </ResponseField>
+    
+    <ResponseField name="maquina_id" type="integer">
+      Machine identifier where this execution line runs
+    </ResponseField>
+    
+    <ResponseField name="fecha_inicio" type="string" required>
+      Start timestamp of the execution line (ISO 8601 format)
+    </ResponseField>
+    
+    <ResponseField name="fecha_fin" type="string">
+      End timestamp when line was completed or cancelled (ISO 8601 format)
+    </ResponseField>
+    
+    <ResponseField name="registros_trabajo" type="array" required>
+      Array of work records capturing production output for this execution line
+      
+      <Expandable title="Work Record Object">
+        <ResponseField name="id" type="integer" required>
+          Unique work record identifier
+        </ResponseField>
+        
+        <ResponseField name="cantidad_producida" type="number" required>
+          Quantity produced in this work session
+        </ResponseField>
+        
+        <ResponseField name="merma_kg" type="number" required>
+          Waste/scrap amount in kilograms
+        </ResponseField>
+        
+        <ResponseField name="parametros" type="string">
+          JSON string containing process parameters (temperature, pressure, speed, etc.)
+        </ResponseField>
+        
+        <ResponseField name="observaciones" type="string">
+          Operator notes and observations
+        </ResponseField>
+        
+        <ResponseField name="fecha_hora" type="string" required>
+          Timestamp when the work was performed (ISO 8601 format)
+        </ResponseField>
+        
+        <ResponseField name="linea_ejecucion_id" type="integer" required>
+          Reference to parent execution line
+        </ResponseField>
+        
+        <ResponseField name="bitacora_id" type="integer" required>
+          Reference to shift log entry
+        </ResponseField>
+        
+        <ResponseField name="maquina_id" type="integer" required>
+          Machine where work was performed
+        </ResponseField>
+        
+        <ResponseField name="estado" type="string" required>
+          Record status (typically "completado")
+        </ResponseField>
+        
+        <ResponseField name="usuario_modificacion" type="string">
+          Username of the operator who recorded this work
+        </ResponseField>
+        
+        <ResponseField name="fecha_modificacion" type="string">
+          Timestamp of last modification (ISO 8601 format)
+        </ResponseField>
+        
+        <ResponseField name="created_at" type="string" required>
+          Record creation timestamp (ISO 8601 format)
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="lotes_produccion" type="array" required>
+  Array of production batches (lotes) created for this order, providing complete traceability
+  
+  <Expandable title="Batch Object">
+    <ResponseField name="id" type="integer" required>
+      Unique batch identifier
+    </ResponseField>
+    
+    <ResponseField name="codigo_lote" type="string" required>
+      Batch code for traceability (unique identifier)
+    </ResponseField>
+    
+    <ResponseField name="codigo_orden" type="string" required>
+      Production order code (joined from orden_produccion table)
+    </ResponseField>
+    
+    <ResponseField name="orden_produccion_id" type="integer" required>
+      Reference to the parent production order
+    </ResponseField>
+    
+    <ResponseField name="bitacora_id" type="integer" required>
+      Reference to the shift log when batch was created
+    </ResponseField>
+    
+    <ResponseField name="correlativo" type="integer" required>
+      Sequential batch number within the order
+    </ResponseField>
+    
+    <ResponseField name="fecha_produccion" type="string" required>
+      Production date (ISO 8601 date format)
+    </ResponseField>
+    
+    <ResponseField name="estado" type="string" required>
+      Batch status: "activo", "pausado", or "cerrado"
+    </ResponseField>
+    
+    <ResponseField name="comentario_estado" type="string">
+      Additional notes about the batch status
+    </ResponseField>
+    
+    <ResponseField name="created_at" type="string" required>
+      Batch creation timestamp (ISO 8601 format)
+    </ResponseField>
+    
+    <ResponseField name="created_by" type="string">
+      Username who created the batch
+    </ResponseField>
+    
+    <ResponseField name="updated_at" type="string">
+      Last update timestamp (ISO 8601 format)
+    </ResponseField>
+    
+    <ResponseField name="updated_by" type="string">
+      Username who last updated the batch
+    </ResponseField>
+    
+    <ResponseField name="motivo_cambio" type="string">
+      Reason for last status change
+    </ResponseField>
+    
+    <ResponseField name="muestras_calidad" type="array" required>
+      Array of quality control samples taken from this batch
+      
+      <Expandable title="Quality Sample Object">
+        <ResponseField name="id" type="integer" required>
+          Unique sample identifier
+        </ResponseField>
+        
+        <ResponseField name="codigo_muestra" type="string">
+          Sample identification code
+        </ResponseField>
+        
+        <ResponseField name="fecha_analisis" type="string" required>
+          Date when sample was analyzed (ISO 8601 date format)
+        </ResponseField>
+        
+        <ResponseField name="lote_id" type="integer" required>
+          Reference to parent batch
+        </ResponseField>
+        
+        <ResponseField name="bitacora_id" type="integer">
+          Reference to shift log entry
+        </ResponseField>
+        
+        <ResponseField name="proceso_id" type="integer">
+          Process where sample was taken
+        </ResponseField>
+        
+        <ResponseField name="maquina_id" type="integer">
+          Machine where sample was taken
+        </ResponseField>
+        
+        <ResponseField name="resultado" type="string" required>
+          Test result: typically "Aprobado", "Rechazado", or "Condicional"
+        </ResponseField>
+        
+        <ResponseField name="valor" type="number">
+          Measured value from the test
+        </ResponseField>
+        
+        <ResponseField name="parametro" type="string">
+          Parameter being measured (e.g., "gramaje", "espesor", "resistencia")
+        </ResponseField>
+        
+        <ResponseField name="valor_nominal" type="number">
+          Target/nominal value for the parameter
+        </ResponseField>
+        
+        <ResponseField name="usuario_modificacion" type="string">
+          Username of quality inspector
+        </ResponseField>
+        
+        <ResponseField name="fecha_modificacion" type="string">
+          Timestamp of last modification (ISO 8601 format)
+        </ResponseField>
+        
+        <ResponseField name="parametros" type="string">
+          JSON string with additional test parameters and metadata
+        </ResponseField>
+        
+        <ResponseField name="created_at" type="string">
+          Sample creation timestamp (ISO 8601 format)
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<RequestExample>
+```bash cURL
+curl -X GET https://api.prod-sys.com/api/dashboard/orden/1023 \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```javascript JavaScript
+const response = await fetch('https://api.prod-sys.com/api/dashboard/orden/1023', {
+  headers: {
+    'Authorization': 'Bearer YOUR_TOKEN'
+  }
+});
+
+const dashboard = await response.json();
+console.log(`Order: ${dashboard.orden_produccion.codigo_orden}`);
+console.log(`Execution lines: ${dashboard.lineas_ejecucion.length}`);
+console.log(`Batches: ${dashboard.lotes_produccion.length}`);
+
+// Calculate total production
+const totalProduced = dashboard.lineas_ejecucion.reduce((sum, linea) => {
+  return sum + linea.registros_trabajo.reduce((s, r) => s + r.cantidad_producida, 0);
+}, 0);
+console.log(`Total produced: ${totalProduced}`);
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    'https://api.prod-sys.com/api/dashboard/orden/1023',
+    headers={'Authorization': 'Bearer YOUR_TOKEN'}
+)
+
+dashboard = response.json()
+order = dashboard['orden_produccion']
+print(f"Order: {order['codigo_orden']}")
+print(f"Status: {order['estado']}")
+print(f"Target: {order['cantidad_objetivo']} {order['unidad']}")
+
+# Calculate total production and waste
+total_produced = sum(
+    record['cantidad_producida']
+    for line in dashboard['lineas_ejecucion']
+    for record in line['registros_trabajo']
+)
+
+total_waste = sum(
+    record['merma_kg']
+    for line in dashboard['lineas_ejecucion']
+    for record in line['registros_trabajo']
+)
+
+print(f"Produced: {total_produced} {order['unidad']}")
+print(f"Waste: {total_waste} kg")
+print(f"Progress: {(total_produced/order['cantidad_objetivo']*100):.1f}%")
+```
+</RequestExample>
+
+<ResponseExample>
+```json Response
+{
+  "orden_produccion": {
+    "id": 1023,
+    "codigo_orden": "ORD-2026-1023",
+    "producto": "Saco de polipropileno 50kg",
+    "cantidad_objetivo": 10000,
+    "unidad": "Unidades",
+    "fecha_planificada": "2026-03-06",
+    "prioridad": "Alta",
+    "observaciones": "Pedido urgente - cliente prioritario",
+    "estado": "En producción",
+    "fecha_creacion": "2026-03-05",
+    "especificaciones": "{\"color\":\"blanco\",\"gramaje\":65,\"dimensiones\":\"60x90cm\",\"tipo_tejido\":\"circular\"}",
+    "motivo_cierre": null
+  },
+  "lineas_ejecucion": [
+    {
+      "id": 45,
+      "estado": "ACTIVA",
+      "orden_produccion_id": 1023,
+      "proceso_id": 1,
+      "maquina_id": 3,
+      "fecha_inicio": "2026-03-06T06:00:00.000Z",
+      "fecha_fin": null,
+      "registros_trabajo": [
+        {
+          "id": 892,
+          "cantidad_producida": 450.5,
+          "merma_kg": 12.3,
+          "parametros": "{\"velocidad\":\"180rpm\",\"tension\":\"45N\",\"temperatura\":\"22C\"}",
+          "observaciones": "Producción normal, sin incidencias",
+          "fecha_hora": "2026-03-06T06:00:00.000Z",
+          "linea_ejecucion_id": 45,
+          "bitacora_id": 12,
+          "maquina_id": 3,
+          "estado": "completado",
+          "usuario_modificacion": "jperez",
+          "fecha_modificacion": "2026-03-06T14:05:00.000Z",
+          "created_at": "2026-03-06T06:00:00.000Z"
+        },
+        {
+          "id": 893,
+          "cantidad_producida": 520.0,
+          "merma_kg": 8.7,
+          "parametros": "{\"velocidad\":\"180rpm\",\"tension\":\"45N\",\"temperatura\":\"23C\"}",
+          "observaciones": "Rendimiento óptimo en turno matutino",
+          "fecha_hora": "2026-03-06T14:00:00.000Z",
+          "linea_ejecucion_id": 45,
+          "bitacora_id": 13,
+          "maquina_id": 3,
+          "estado": "completado",
+          "usuario_modificacion": "mrodriguez",
+          "fecha_modificacion": "2026-03-06T22:10:00.000Z",
+          "created_at": "2026-03-06T14:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": 52,
+      "estado": "ACTIVA",
+      "orden_produccion_id": 1023,
+      "proceso_id": 4,
+      "maquina_id": 18,
+      "fecha_inicio": "2026-03-06T07:00:00.000Z",
+      "fecha_fin": null,
+      "registros_trabajo": [
+        {
+          "id": 901,
+          "cantidad_producida": 3250,
+          "merma_kg": 45.2,
+          "parametros": "{\"velocidad_corte\":\"85/min\",\"temperatura_sellado\":\"180C\"}",
+          "observaciones": "Conversión de rollos a sacos terminados",
+          "fecha_hora": "2026-03-06T07:00:00.000Z",
+          "linea_ejecucion_id": 52,
+          "bitacora_id": 12,
+          "maquina_id": 18,
+          "estado": "completado",
+          "usuario_modificacion": "agarcia",
+          "fecha_modificacion": "2026-03-06T14:30:00.000Z",
+          "created_at": "2026-03-06T07:00:00.000Z"
+        }
+      ]
+    }
+  ],
+  "lotes_produccion": [
+    {
+      "id": 567,
+      "codigo_lote": "LOTE-ORD2026-1023-001",
+      "codigo_orden": "ORD-2026-1023",
+      "orden_produccion_id": 1023,
+      "bitacora_id": 12,
+      "correlativo": 1,
+      "fecha_produccion": "2026-03-06",
+      "estado": "activo",
+      "comentario_estado": null,
+      "created_at": "2026-03-06T06:15:00.000Z",
+      "created_by": "jperez",
+      "updated_at": "2026-03-06T06:15:00.000Z",
+      "updated_by": null,
+      "motivo_cambio": null,
+      "muestras_calidad": [
+        {
+          "id": 234,
+          "codigo_muestra": "M-LOTE567-001",
+          "fecha_analisis": "2026-03-06",
+          "lote_id": 567,
+          "bitacora_id": 12,
+          "proceso_id": 1,
+          "maquina_id": 3,
+          "resultado": "Aprobado",
+          "valor": 64.8,
+          "parametro": "gramaje",
+          "valor_nominal": 65.0,
+          "usuario_modificacion": "lcalidad",
+          "fecha_modificacion": "2026-03-06T10:30:00.000Z",
+          "parametros": null,
+          "created_at": "2026-03-06T10:30:00.000Z"
+        },
+        {
+          "id": 235,
+          "codigo_muestra": "M-LOTE567-002",
+          "fecha_analisis": "2026-03-06",
+          "lote_id": 567,
+          "bitacora_id": 12,
+          "proceso_id": 1,
+          "maquina_id": 3,
+          "resultado": "Aprobado",
+          "valor": 28.5,
+          "parametro": "resistencia_traccion",
+          "valor_nominal": 28.0,
+          "usuario_modificacion": "lcalidad",
+          "fecha_modificacion": "2026-03-06T10:35:00.000Z",
+          "parametros": "{\"metodo\":\"ASTM-D5034\",\"direccion\":\"longitudinal\"}",
+          "created_at": "2026-03-06T10:35:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": 568,
+      "codigo_lote": "LOTE-ORD2026-1023-002",
+      "codigo_orden": "ORD-2026-1023",
+      "orden_produccion_id": 1023,
+      "bitacora_id": 13,
+      "correlativo": 2,
+      "fecha_produccion": "2026-03-06",
+      "estado": "activo",
+      "comentario_estado": null,
+      "created_at": "2026-03-06T14:20:00.000Z",
+      "created_by": "mrodriguez",
+      "updated_at": "2026-03-06T14:20:00.000Z",
+      "updated_by": null,
+      "motivo_cambio": null,
+      "muestras_calidad": [
+        {
+          "id": 236,
+          "codigo_muestra": "M-LOTE568-001",
+          "fecha_analisis": "2026-03-06",
+          "lote_id": 568,
+          "bitacora_id": 13,
+          "proceso_id": 1,
+          "maquina_id": 3,
+          "resultado": "Aprobado",
+          "valor": 65.2,
+          "parametro": "gramaje",
+          "valor_nominal": 65.0,
+          "usuario_modificacion": "lcalidad",
+          "fecha_modificacion": "2026-03-06T18:45:00.000Z",
+          "parametros": null,
+          "created_at": "2026-03-06T18:45:00.000Z"
+        }
+      ]
+    }
+  ]
+}
+```
+</ResponseExample>
+
+## Use Cases
+
+### Production Monitoring
+Track real-time progress of a specific order across all manufacturing processes. The nested structure provides visibility into:
+- Which machines are working on the order
+- Production output per shift and machine
+- Waste/scrap levels
+- Quality control results
+
+### Traceability
+Complete batch-level traceability linking:
+- Production order → Execution lines → Work records → Batches → Quality samples
+- All records include timestamps, operators, and shift information
+- Parametros fields contain process conditions for each production run
+
+### Quality Analysis
+Analyze quality metrics for an order:
+- Compare measured values against nominal specifications
+- Identify which batches passed or failed quality checks
+- Track quality inspector activities and test results
+- Correlate quality issues with specific machines or shifts
+
+### Progress Calculation
+Calculate order completion percentage by:
+1. Sum all `cantidad_producida` from work records across execution lines
+2. Compare against `orden_produccion.cantidad_objetivo`
+3. Account for waste using `merma_kg` values
+
+### KPI Reporting
+Extract metrics such as:
+- Production efficiency (actual vs target)
+- Waste percentage
+- Quality pass rate
+- Cycle time per process
+- Machine utilization
+
+## Data Completeness
+
+This endpoint performs eager loading of related data:
+- All execution lines for the order
+- All work records for each execution line
+- All batches created for the order
+- All quality samples for each batch
+
+The response can be large for orders with extensive production history. Consider:
+- Caching responses for completed orders
+- Paginating work records if implementation changes in the future
+- Using filters if only specific process data is needed
+
+## Error Responses
+
+<ResponseField name="404 Not Found">
+  Returned when the specified order ID does not exist in the system
+  
+  ```json
+  {
+    "error": "Orden no encontrada"
+  }
+  ```
+</ResponseField>
+
+## Related Endpoints
+
+- [Get Dashboard Summary](/api/dashboard/summary) - System-wide overview
+- [Get Production Order](/api/production/orders) - Order management
+- [List Work Records](/api/production/work-records) - Detailed work record queries
+- [List Batches](/api/quality/batches) - Batch and traceability management
+- [List Quality Samples](/api/quality/muestras) - Quality control data

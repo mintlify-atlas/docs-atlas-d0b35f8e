@@ -1,0 +1,539 @@
+---
+title: Extrusor de Polipropileno (PP Extruder)
+description: Continuous extrusion process that transforms polypropylene resin into high-strength rafia tape for weaving
+---
+
+## Overview
+
+Extrusor de Polipropileno (Process ID: 1) is the **starting point** of the production chain. It transforms virgin polypropylene resin and additives into rafia tape—the fundamental material for woven polypropileno bags. This continuous extrusion process operates 24/7 with minimal downtime.
+
+### Process Characteristics
+
+- **Process Type**: Continuous production
+- **Production Unit**: kg (kilograms)
+- **Product**: Polypropylene rafia tape on bobbins
+- **Machines**: 1 extruder (EXTPP)
+- **Order Pattern**: `1\d{6}` (e.g., 1000056)
+- **Production Target**: 1,000 kg per shift
+- **Chain Position**: **Start of chain** (esInicioCadena: true)
+
+### What This Process Does
+
+The Extrusor PP process:
+- **Receives**: PP resin pellets, masterbatch colorants, UV stabilizers, antiblock agents
+- **Transforms**: Resin pellets → Technical tape on bobbins
+- **Delivers**: Weighed and labeled tape bobbins for Telares
+- **Method**: Flat-die extrusion, water quenching, stretching, and winding
+
+## Production Flow
+
+### Upstream Dependencies
+
+**None**—this is the first process in the chain.
+
+Raw materials are purchased externally:
+- Polypropylene resin (virgin)
+- Recycled material (pelet)
+- Masterbatch colorants
+- UV stabilizers
+- Antiblock/antifibrillation agents
+
+### Downstream Consumers
+
+Extruded tape feeds into:
+- **Telares (Process 2)**: Primary consumer for all tape production
+
+### Production Tracking Method
+
+**Accumulated Counter Method** (`extrusorPP.service.js:42-55`):
+
+```javascript
+const ultimoRegistroTurno = await this.extrusorPPRepository.getUltimoRegistro(bitacora_id, maquina.id);
+let ultimoAcumulado;
+
+if (ultimoRegistroTurno) {
+  ultimoAcumulado = JSON.parse(ultimoRegistroTurno.parametros).acumulado_contador;
+} else {
+  ultimoAcumulado = await this.extrusorPPRepository.getUltimoAcumuladoHistorico(maquina.id, bitacora_id);
+}
+
+const cantidad_producida = produccion.acumulado_contador - (ultimoAcumulado || 0);
+if (cantidad_producida < 0) {
+  throw new ValidationError('El acumulado no puede ser menor al anterior.');
+}
+```
+
+Production = difference between current and previous accumulated counter readings.
+
+## Data Structures
+
+### Key Tables
+
+#### registros_trabajo
+```javascript
+{
+  linea_ejecucion_id: FK,
+  bitacora_id: FK,
+  maquina_id: 1, // EXTPP
+  cantidad_producida: kg_calculated,
+  merma_kg: waste,
+  parametros: JSON {
+    acumulado_contador: integer,
+    rpm_tornillo: decimal,
+    velocidad_embobinadores: decimal,
+    temperaturas: {
+      temp_zona_1: 180, temp_zona_2: 185, ... temp_zona_12: 230,
+      temp_pila: 50, temp_horno: 160
+    },
+    ratios: {
+      ratio_top_roller: 1.2,
+      ratio_holding: 1.0,
+      ratio_annealing: 0.98,
+      ratio_stretching: 5.5
+    },
+    materias_primas: [
+      { tipo: 'Resina de polipropileno', marca: 'LyondellBasell', lote: 'PP-2024-03', porcentaje: 85 },
+      { tipo: 'Masterbatch colorante', marca: 'Clariant', lote: 'MC-BLANCO-2024', porcentaje: 10 },
+      { tipo: 'Filtro anti UV', marca: 'Ampacet', lote: 'UV-4567', porcentaje: 5 }
+    ]
+  }
+}
+```
+
+#### calidad_muestras
+Quality samples (3 sets per shift):
+```javascript
+{
+  bitacora_id: FK,
+  proceso_id: 1,
+  maquina_id: 1,
+  parametro: 'denier' | 'resistencia' | 'elongacion' | 'ancho_cinta' | 'tenacidad',
+  valor: decimal,
+  resultado: 'Cumple' | 'No cumple'
+}
+```
+
+### Lot Generation
+
+**Automatic Lot per Order+Shift** (`extrusorPP.service.js:126`):
+
+```javascript
+const lote = await this.loteService.generarOObtenerLote(orden_id, bitacora_id, fechaHoy, usuario);
+```
+
+Lot format: `{codigo_orden}-{correlativo}`
+
+Example: **1000056-003** (Order 1000056, 3rd lot)
+
+**Lot Rules** (`ExtrusorPPContract.js:182-203`):
+```javascript
+reglasLote: {
+  generacion: 'automatica',
+  codigoFormato: '{codigo_orden}-{correlativo_3_digitos}',
+  correlativo: {
+    alcance: 'por_orden',
+    descripcion: 'Correlative increments each time the order generates a new lot in any shift, cumulative historical. Never resets unless order is cancelled and recreated.'
+  },
+  estadosLote: ['activo', 'pausado', 'cerrado'],
+  transicionEstado: 'Lot remains active while order is in production. Closes when order closes or cancels.',
+  responsableGeneracion: 'sistema',
+  momentoGeneracion: 'al guardar producción del turno si no existe lote previo para esa combinación orden+bitácora'
+}
+```
+
+## Quality Parameters
+
+### Critical Parameters
+
+#### 1. Denier
+- **Unit**: g/9000m (weight per 9000 meters)
+- **Range**: 790-820 g/9000m
+- **Nominal**: 805 g/9000m
+- **Critical**: **YES**
+- **Sampling**: 3 samples per shift (shift start, midpoint, 2 hours before close)
+- **Method**: Average of 20 tapes × 50m × 180
+- **Impact**: Directly affects fabric weight and strength
+
+#### 2. Resistance (resistencia)
+- **Unit**: kg (breaking strength)
+- **Range**: 4.0-5.0 kg
+- **Nominal**: 4.5 kg
+- **Critical**: **YES**
+- **Sampling**: 3 samples per shift
+- **Method**: Average of 20 tapes
+- **Impact**: Determines bag load capacity
+
+#### 3. Elongation (elongación)
+- **Unit**: %
+- **Range**: 14-20%
+- **Nominal**: 17%
+- **Critical**: No
+- **Sampling**: 3 samples per shift
+- **Method**: Average of 20 tapes
+
+#### 4. Tape Width (ancho_cinta)
+- **Unit**: mm
+- **Range**: 2.9-3.1 mm
+- **Nominal**: 3.0 mm
+- **Critical**: No
+- **Sampling**: 3 samples per shift
+- **Method**: Average of 20 tapes
+
+#### 5. Tenacity (tenacidad) — CALCULATED
+- **Unit**: gf/den (gram-force per denier)
+- **Range**: 4.5-5.5 gf/den
+- **Nominal**: 5.0 gf/den
+- **Critical**: No
+- **Formula**: `(resistencia × 1000) / denier`
+- **Auto-calculated**: System computes from resistance and denier
+
+**Auto-Calculation Logic** (`extrusorPP.service.js:92-109`):
+```javascript
+for (const m of muestras) {
+  let tenacidad = null;
+  let resultadoTenacidad = null;
+  if (m.denier > 0 && m.resistencia > 0) {
+    tenacidad = (m.resistencia * 1000) / m.denier;
+    resultadoTenacidad = (tenacidad >= 4.5 && tenacidad <= 5.5) ? 'Cumple' : 'No cumple';
+  }
+
+  const parametrosMuestra = [
+    { p: 'denier', v: m.denier, r: m.resultado_denier },
+    { p: 'resistencia', v: m.resistencia, r: m.resultado_resistencia },
+    { p: 'elongacion', v: m.elongacion, r: m.resultado_elongacion },
+    { p: 'ancho_cinta', v: m.ancho_cinta, r: m.resultado_ancho_cinta }
+  ];
+
+  if (tenacidad !== null) {
+    parametrosMuestra.push({ p: 'tenacidad', v: tenacidad, r: resultadoTenacidad });
+  }
+}
+```
+
+### Sampling Frequency (`ExtrusorPPContract.js:156-175`)
+
+```javascript
+frecuenciaMuestreo: {
+  muestrasMinTurno: 3,
+  distribucion: [
+    { indice: 1, descripcion: 'Primera tanda del turno', momento: 'inicio_turno' },
+    { indice: 2, descripcion: 'Muestra a la mitad del turno', momento: 'mitad_turno' },
+    { indice: 3, descripcion: 'Tanda dos horas antes del cierre del turno', momento: 'dos_horas_antes_cierre' }
+  ],
+  omisionRequiereMotivo: true,
+  permiteCopiarMuestraAnterior: true,
+  copiarCampos: {
+    modo: 'por_grupo',
+    grupos: [
+      { grupo: 'temperaturas', etiqueta: 'Temperaturas', copiable: true },
+      { grupo: 'ratios', etiqueta: 'Ratios de Estiraje', copiable: true },
+      { grupo: 'maquina', etiqueta: 'Parámetros de Máquina', copiable: true },
+      { grupo: 'materias_primas', etiqueta: 'Materias Primas', copiable: true }
+    ],
+    nota: 'El operario selecciona qué grupos copiar del turno anterior. Los parámetros de calidad nunca se copian, siempre se ingresan manualmente.'
+  }
+}
+```
+
+**Key Feature**: Operators can copy operational parameters (temps, ratios, materials) from previous shift, but **quality measurements must always be entered manually**.
+
+## Business Logic
+
+### Raw Material Formula Validation (`extrusorPP.service.js:58-63`)
+
+```javascript
+if (parametros_operativos.materias_primas && parametros_operativos.materias_primas.length > 0) {
+  const sumaPorcentajes = parametros_operativos.materias_primas.reduce((acc, mp) => acc + (mp.porcentaje || 0), 0);
+  if (Math.abs(sumaPorcentajes - 100) > 0.01) {
+    throw new ValidationError('La suma de porcentajes de materias primas debe ser 100%.');
+  }
+}
+```
+
+Material percentages must sum to exactly 100%.
+
+### Material Options (`ExtrusorPPContract.js:146-154`)
+
+```javascript
+opcionesTipo: [
+  'Resina de polipropileno',
+  'Antifibrilante',
+  'Pelet (reciclado)',
+  'Filtro anti UV',
+  'Oxobiodegradable',
+  'Masterbatch colorante'
+]
+```
+
+Typical formula:
+- 85% virgin PP resin
+- 10% recycled material (pelet)
+- 3% UV stabilizer
+- 2% masterbatch colorant
+
+### State Calculation (`extrusorPP.service.js:129-142`)
+
+```javascript
+const todasMuestras = await this.extrusorPPRepository.getMuestras(bitacora_id);
+const numSets = Math.floor(todasMuestras.length / 5); // 5 params per set
+
+let estadoProceso = 'Parcial';
+if (numSets === 0 && cantidad_producida === 0) {
+  estadoProceso = 'Sin datos';
+} else if (numSets >= 3) {
+  estadoProceso = 'Completo';
+}
+
+const tieneDesviacion = todasMuestras.some(m => m.resultado === 'No cumple');
+if (tieneDesviacion) {
+  estadoProceso = 'Con desviación';
+}
+```
+
+Complete state requires 3 full sample sets (15 measurements: 3 sets × 5 params).
+
+## API Endpoints
+
+### GET `/api/extrusorpp/detalle/:bitacoraId`
+
+Returns extruder status for a shift:
+
+**Response**:
+```javascript
+{
+  maquina: { id: 1, codigo: 'EXTPP', nombre_visible: 'Extrusor PP' },
+  estado_proceso: 'Completo',
+  ultimo_registro: {
+    id: 45,
+    orden_id: 56,
+    codigo_orden: '1000056',
+    cantidad_producida: 1050,
+    merma_kg: 12.3,
+    parametros: '{ "acumulado_contador": 125600, "rpm_tornillo": 45, ... }'
+  },
+  muestras: [
+    { parametro: 'denier', valor: 803, resultado: 'Cumple' },
+    { parametro: 'resistencia', valor: 4.6, resultado: 'Cumple' },
+    { parametro: 'elongacion', valor: 16.8, resultado: 'Cumple' },
+    { parametro: 'ancho_cinta', valor: 3.0, resultado: 'Cumple' },
+    { parametro: 'tenacidad', valor: 5.73, resultado: 'Cumple' }
+    // ... repeat for 3 sample sets
+  ],
+  lote: {
+    id: 15,
+    codigo_lote: '1000056-003',
+    estado: 'activo',
+    fecha_produccion: '2026-03-06'
+  }
+}
+```
+
+**Implementation**: `extrusorPP.service.js:158-179`
+
+### POST `/api/extrusorpp/guardar`
+
+Saves shift extruder data:
+
+**Request Body**:
+```javascript
+{
+  bitacora_id: 42,
+  orden_id: 56,
+  produccion: {
+    acumulado_contador: 126650,
+    desperdicio_kg: 12.3,
+    observaciones: ''
+  },
+  muestras: [
+    {
+      denier: 803,
+      resultado_denier: 'Cumple',
+      resistencia: 4.6,
+      resultado_resistencia: 'Cumple',
+      elongacion: 16.8,
+      resultado_elongacion: 'Cumple',
+      ancho_cinta: 3.0,
+      resultado_ancho_cinta: 'Cumple'
+    },
+    // Sample 2...
+    // Sample 3...
+  ],
+  parametros_operativos: {
+    rpm_tornillo: 45,
+    velocidad_embobinadores: 280,
+    temp_zona_1: 180,
+    temp_zona_2: 185,
+    // ... through zona_12
+    temp_pila: 50,
+    temp_horno: 160,
+    ratio_top_roller: 1.2,
+    ratio_holding: 1.0,
+    ratio_annealing: 0.98,
+    ratio_stretching: 5.5,
+    materias_primas: [
+      {
+        tipo: 'Resina de polipropileno',
+        marca: 'LyondellBasell',
+        lote: 'PP-2024-03',
+        porcentaje: 85
+      },
+      {
+        tipo: 'Masterbatch colorante',
+        marca: 'Clariant',
+        lote: 'MC-BLANCO-2024',
+        porcentaje: 10
+      },
+      {
+        tipo: 'Filtro anti UV',
+        marca: 'Ampacet',
+        lote: 'UV-4567',
+        porcentaje: 5
+      }
+    ]
+  }
+}
+```
+
+**Response**:
+```javascript
+{
+  registro_id: 45,
+  lote: {
+    id: 15,
+    codigo_lote: '1000056-003'
+  },
+  estado_proceso: 'Completo'
+}
+```
+
+**Transaction Flow** (`extrusorPP.service.js:66-156`):
+1. Validate order exists and belongs to Process 1
+2. Calculate production from counter difference
+3. Validate raw material formula sums to 100%
+4. Get/create `linea_ejecucion`
+5. Save `registros_trabajo` with operational params
+6. For each sample:
+   - Calculate tenacity from resistance and denier
+   - Save 5 quality parameters (including calculated tenacidad)
+7. Generate or retrieve lot for order+shift
+8. Calculate process state (3 sample sets required)
+9. Update `bitacora_maquina_status`
+
+**Implementation**: `extrusorPP.service.js:13-156`  
+**Permission Required**: `MANAGE_PRODUCTION`
+
+## Machine Status States
+
+**Calculated in**: `extrusorPP.service.js:129-142`
+
+- **Sin datos**: No samples and no production
+- **Parcial**: Some samples or production recorded
+- **Completo**: At least 3 complete sample sets (15 measurements)
+- **Con desviación**: Complete but quality parameters out of range
+
+## Traceability
+
+### Lot Flow (Start of Chain)
+
+```
+Extrusor PP produces lot: 1000056-003
+          ↓
+Telares consume 1000056-003
+          ↓
+Telares produce roll: R047-T05
+          ↓
+... downstream processes
+```
+
+All downstream traceability originates from Extrusor PP lots.
+
+### Raw Material Tracking
+
+Each shift records:
+- Material type (resin, colorant, UV, etc.)
+- Brand
+- Lot number
+- Percentage in formula
+
+This enables:
+- Root cause analysis of quality issues
+- Supplier performance tracking
+- Formula optimization
+
+## Operational Rules
+
+### Personnel Requirements (`ExtrusorPPContract.js:46-50`)
+
+```javascript
+personalOperativo: {
+  minimo: 1,
+  maximo: 2,
+  reglasEspeciales: 'Requiere un operador senior para el arranque y un auxiliar para cambios de bobina durante régimen estable.'
+}
+```
+
+Senior operator required for startup; auxiliary can assist during steady-state operation.
+
+### Stop Restrictions (`ExtrusorPPContract.js:16-21`)
+
+```javascript
+restriccionesInicio: [
+  'Máquina en mantenimiento',
+  'Falta de materia prima',
+  'Temperatura fuera de rango al arranque',
+  'Fallo de equipos auxiliares: bomba de agua, enfriador, compresor'
+]
+```
+
+### Downtime Categories (`ExtrusorPPContract.js:40-45`)
+
+- **Operational**: Bobbin changes, die cleaning, denier adjustment, material loading
+- **Mechanical**: Main motor failure, belt breakage, heating element failure, winder failure
+- **Quality**: Denier out of range, low resistance, irregular width
+- **External**: Electrical failure, personnel shortage, raw material shortage
+
+## Impact of Variability (`ExtrusorPPContract.js:51-54`)
+
+```javascript
+impactoVariabilidad: [
+  {
+    condicion: 'Humedad en resina',
+    impacto: 'Genera burbujas y roturas en la cortina, reduciendo producción.'
+  },
+  {
+    condicion: 'Uso de material recuperado > 20%',
+    impacto: 'Reduce la tenacidad de la cinta y requiere ajustes frecuentes de temperatura.'
+  }
+]
+```
+
+**Critical**: Resin moisture causes bubbles and breaks. Recycled material > 20% degrades tape tenacity.
+
+## Process Parameters
+
+### Temperature Zones
+
+**14 zones** (`ExtrusorPPContract.js:117-130`):
+- `temp_zona_1` through `temp_zona_12`: Barrel zones
+- `temp_pila`: Stack temperature
+- `temp_horno`: Oven temperature
+
+Typical profile: 180°C (feed) → 230°C (die)
+
+### Stretching Ratios
+
+**4 ratios** (`ExtrusorPPContract.js:131-134`):
+- `ratio_top_roller`: Top roller draw ratio
+- `ratio_holding`: Holding ratio
+- `ratio_annealing`: Annealing ratio
+- `ratio_stretching`: Main stretching ratio (typically 5-6x)
+
+These ratios control:
+- Tape orientation
+- Molecular alignment
+- Final mechanical properties
+
+## Related Processes
+
+- **Downstream**: [Telares](/processes/telares) (Process 2)
+- **Related**: [Production Orders](/quality/orders), [Lot Management](/quality/lots)

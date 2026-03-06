@@ -1,0 +1,377 @@
+---
+title: Incident Management
+description: Reporting, tracking, and closing production incidents
+---
+
+Incidents in PROD-SYS track problems, deviations, and events that impact production quality, equipment performance, or personnel safety. They ensure accountability and enable continuous improvement through root cause analysis.
+
+## Understanding Incidents
+
+An incident represents any unplanned event during production:
+
+- Equipment failures or malfunctions
+- Quality deviations or defects
+- Safety events or near-misses
+- Material issues or shortages
+- Process parameter excursions
+- Operator errors or training gaps
+
+### Incident Lifecycle
+
+```
+Abierto → En investigación → Cerrado
+```
+
+- **Abierto**: Newly reported, awaiting investigation
+- **En investigación**: Root cause analysis in progress
+- **Cerrado**: Resolved with corrective action documented
+
+## Creating an Incident
+
+Navigate to **Producción → Incidentes**.
+
+<Steps>
+  <Step title="Access Incident Form">
+    On the incidents page, find the "Reportar Nuevo Incidente" card on the left.
+  </Step>
+  
+  <Step title="Enter Short Title">
+    Provide a concise description (e.g., "Motor bearing failure on T-03").
+    
+    Good titles:
+    - "Broken needle on sewing machine #5"
+    - "Ancho parameter out of spec"
+    - "Material shortage - polymer batch delayed"
+    
+    Avoid vague titles:
+    - "Problem"
+    - "Machine stopped"
+    - "Issue"
+  </Step>
+  
+  <Step title="Select Severity">
+    Choose the impact level:
+    
+    **Baja (Low - Informational)**
+    - No production impact
+    - Minor observations
+    - Process improvement opportunities
+    
+    **Media (Medium - Deviation)**
+    - Quality parameter deviation
+    - Reduced efficiency or throughput
+    - Workaround implemented
+    - Scheduled maintenance required
+    
+    **Alta (High - Line Stoppage)**
+    - Production line stopped
+    - Critical quality failure
+    - Safety hazard present
+    - Major equipment damage
+  </Step>
+  
+  <Step title="Describe the Problem">
+    Enter a detailed description including:
+    - What happened
+    - When it was detected
+    - Which machine/process/order affected
+    - Immediate impact on production
+    - Initial observations
+    
+    Example:
+    ```
+    Durante el turno T2 (15:30), se detectó vibración anormal en motor
+    principal de telar T-03 durante producción de orden 2000145. 
+    Temperatura del motor aumentó de 60°C a 85°C en 10 minutos.
+    Operador detuvo máquina preventivamente. 
+    Producción aproximada perdida: 200 m².
+    ```
+  </Step>
+  
+  <Step title="Link to Execution (Optional)">
+    If the incident is associated with a specific production line:
+    - The system can link to `linea_ejecucion_id`
+    - This connects the incident to the order + process + machine context
+    
+    <Note>Currently, línea selection is not exposed in the UI. Future versions will support dropdown selection.</Note>
+  </Step>
+  
+  <Step title="Register Incident">
+    Click **Registrar Incidente**. The incident is created with:
+    - Estado: "abierto"
+    - Fecha_creacion: Current timestamp
+    - Auto-assigned incident ID
+  </Step>
+</Steps>
+
+## Incident List View
+
+The incidents table shows:
+
+| Column | Description |
+|--------|-------------|
+| Fecha | Creation timestamp |
+| Incidente | Title (short description) |
+| Severidad | Baja, Media, Alta with color badge |
+| Estado | abierto, en_investigacion, cerrado |
+| Acciones | Update status or view details |
+
+### Sorting and Filtering
+
+Incidents are displayed:
+- Sorted by creation date (newest first)
+- Color-coded by severity:
+  - 🟢 Green: Baja
+  - 🟡 Yellow: Media
+  - 🔴 Red: Alta
+
+## Updating an Incident
+
+<Steps>
+  <Step title="Select Incident">
+    Click on the incident row or "Acciones" button in the table.
+  </Step>
+  
+  <Step title="Update Status">
+    Change estado:
+    - **abierto → en_investigacion**: Investigation started
+    - **en_investigacion → cerrado**: Resolution complete
+    - **abierto → cerrado**: Quick resolution (minor issues)
+  </Step>
+  
+  <Step title="Document Corrective Action (for Closure)">
+    If closing the incident, the `accion_correctiva` field is required:
+    
+    Include:
+    - Root cause identified
+    - Corrective action taken
+    - Preventive measures implemented
+    - Verification of effectiveness
+    
+    Example:
+    ```
+    Causa raíz: Rodamiento del motor desgastado (>5000 horas de uso).
+    Acción correctiva: Reemplazo de rodamiento 6308-2RS.
+    Mantenimiento preventivo: Programado cada 3000 horas operativas.
+    Verificación: Motor funcionando normalmente, temperatura estable 55-60°C.
+    Producción reanudada a las 18:45.
+    ```
+  </Step>
+  
+  <Step title="Save Changes">
+    Update the incident record. The system:
+    - Sets `fecha_cierre` (timestamp) when estado becomes "cerrado"
+    - Validates that accion_correctiva is provided for closed incidents
+    - Logs the update in audit trail
+  </Step>
+</Steps>
+
+## Inline Incident Reporting
+
+### During Shift Log Recording
+
+For **Proceso 1 (Extrusor PP)**, incidents can be logged directly in the process data form:
+
+<Steps>
+  <Step title="Open Process Detail">
+    From Bitácora de Turno, click on "Extrusor PP" process card.
+  </Step>
+  
+  <Step title="Find Incidents Section">
+    Scroll to the "Incidentes" section in the form.
+  </Step>
+  
+  <Step title="Add Incident Details">
+    Enter incident information inline. This is stored in the `parametros` JSON field of the registro_trabajo.
+  </Step>
+  
+  <Step title="Save Process Data">
+    The incident data is saved with the production record and can be extracted for formal incident tracking.
+  </Step>
+</Steps>
+
+<Note>
+Inline incident reporting is currently specific to Extrusor PP. Other processes should use the dedicated Incidentes module.
+</Note>
+
+## Severity Guidelines
+
+### When to Use "Baja"
+
+- Process observations for improvement
+- Minor cosmetic defects (not affecting function)
+- Informational notes for management
+- Completed preventive maintenance
+- Training opportunities identified
+
+### When to Use "Media"
+
+- Quality parameter slightly outside tolerance
+- Equipment running with reduced capacity
+- Material substitution required
+- Rework needed (but production continues)
+- Delayed maintenance becoming urgent
+
+### When to Use "Alta"
+
+- Production line stopped or unable to operate
+- Quality failure requiring product hold or scrap
+- Safety incident or hazard requiring immediate action
+- Equipment failure with no immediate workaround
+- Customer complaint or shipment rejection
+
+<Warning>
+Always escalate safety incidents immediately to supervision, regardless of production impact.
+</Warning>
+
+## Integration with Shift Logs
+
+### Impact on Closure
+
+Incidents affect shift log closure:
+
+1. **Quality rejections** in muestras trigger "Revisión" status
+2. The `_checkNeedsRevision()` method detects incidents
+3. Supervisor must review and approve closure
+4. **Observations become mandatory** when incidents exist
+
+### Linking Context
+
+Incidents linked to `linea_ejecucion_id` carry full context:
+- Production order (codigo_orden)
+- Process (proceso_id, proceso_nombre)
+- Machine (maquina_id)
+- Shift (bitacora_id → turno, fecha_operativa)
+- Operator (usuario from registro_trabajo)
+
+This enables powerful root cause analysis by correlating:
+- Order specifications vs. actual parameters
+- Machine performance history
+- Operator training records
+- Material batch traceability
+
+## Incident Repository
+
+The data model (from `incidente.repository.js`):
+
+```javascript
+{
+  id: 1,
+  titulo: "Broken needle on machine 5",
+  descripcion: "Detailed problem description...",
+  severidad: "media",
+  estado: "abierto",
+  linea_ejecucion_id: 123,  // Optional link
+  accion_correctiva: null,   // Required for closure
+  fecha_creacion: "2024-01-25T14:30:00Z",
+  fecha_cierre: null         // Set when estado = cerrado
+}
+```
+
+### Query Patterns
+
+**All incidents (newest first)**:
+```
+GET /api/incidentes
+```
+
+**Create incident**:
+```
+POST /api/incidentes
+Body: { titulo, descripcion, severidad, linea_ejecucion_id }
+```
+
+**Update incident**:
+```
+PUT /api/incidentes/:id
+Body: { titulo, descripcion, severidad, estado, accion_correctiva }
+```
+
+## Best Practices
+
+<Check>Report incidents immediately when detected, not at shift end</Check>
+<Check>Use descriptive titles that allow quick incident identification</Check>
+<Check>Include quantitative data in descriptions (temperatures, pressures, counts)</Check>
+<Check>Link incidents to execution context when possible</Check>
+<Check>Document corrective actions thoroughly for knowledge sharing</Check>
+<Check>Use severidad consistently to enable trend analysis</Check>
+
+<Warning>Do not close incidents without documenting corrective action. This breaks continuous improvement.</Warning>
+
+## Reporting and Analysis
+
+Incidents support several analytical workflows:
+
+### Frequency Analysis
+
+- Group by severidad to identify high-impact areas
+- Count by proceso_id to find problematic processes
+- Trend over time to measure improvement initiatives
+
+### Pareto Analysis
+
+- Identify top causes (from descriptions or future categorization)
+- Focus corrective actions on high-frequency issues
+- Calculate downtime cost by severity
+
+### Root Cause Trends
+
+- Extract common themes from accion_correctiva text
+- Link to machine maintenance schedules
+- Correlate with material batch quality
+
+### Closure Time Metrics
+
+- Calculate `fecha_cierre - fecha_creacion`
+- Track average resolution time by severidad
+- Identify bottlenecks in investigation workflow
+
+## Audit Trail
+
+All incident operations are logged:
+
+- **CREATE**: Initial report with username and timestamp
+- **UPDATE**: Changes to any field (status, description, corrective action)
+- **CLOSURE**: Final estado change with accion_correctiva
+
+Access via **Administración → Auditoría**, entity type "Incidente".
+
+## Future Enhancements
+
+Planned improvements to incident management:
+
+1. **Categorization**: Predefined incident types (mechanical, quality, material, operator)
+2. **Línea Selection UI**: Dropdown to select execution line during incident creation
+3. **Attachment Support**: Photos, documents, or logs associated with incidents
+4. **Notification System**: Alert supervisors for alta severity incidents
+5. **Incident Board**: Kanban-style view for tracking investigation progress
+6. **RCA Template**: Structured root cause analysis form (5 Whys, Fishbone)
+
+## Troubleshooting
+
+### Cannot Close Incident
+
+**Error**: "Acción correctiva es obligatoria para cerrar incidente"
+
+- The `accion_correctiva` field is required when estado changes to "cerrado"
+- Provide detailed description of resolution
+- Include verification of effectiveness
+
+### Incident Not Showing in List
+
+- Check creation timestamp (list sorted newest first)
+- Verify incident was saved successfully
+- Refresh page to reload data
+- Check browser console for API errors
+
+### Cannot Link to Execution Line
+
+- Línea selection is not yet exposed in UI
+- Currently requires direct API call or database update
+- Future versions will support dropdown selection
+
+## Related Topics
+
+- [Shift Logs](/guides/shift-logs) - Recording incidents during shifts
+- [Production Orders](/guides/production-orders) - Context for order-related incidents
+- [Traceability](/guides/traceability) - Following incidents through production chain

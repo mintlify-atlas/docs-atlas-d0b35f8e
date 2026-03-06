@@ -1,80 +1,289 @@
 ---
 title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+description: "Get PROD-SYS running and start tracking production in minutes"
 ---
 
-## Get started in three steps
+# Quick Start Guide
 
-Get your documentation site running locally and make your first customization.
-
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+This guide will get you from zero to tracking your first production order in under 10 minutes.
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+Already have PROD-SYS installed? Skip to [Step 3](#step-3-bootstrap-the-system).
 </Note>
+
+## Prerequisites
+
+Before starting, ensure you have:
+- Node.js 18+ installed
+- Basic terminal/command line knowledge
+- 512MB available RAM
+
+## Step 1: Clone and Install
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/Boris-Lazo/trazabilidad-y-calidad-industrial.git
+    cd trazabilidad-y-calidad-industrial
+    ```
+  </Step>
+
+  <Step title="Run the automated setup">
+    ```bash
+    chmod +x setup.sh
+    ./setup.sh
+    ```
+
+    This script will:
+    - Install all npm dependencies
+    - Generate a secure `.env` file with random JWT secret
+    - Set default configuration values
+  </Step>
+
+  <Step title="Review your environment configuration">
+    Open `.env` and update these critical fields:
+
+    ```bash .env
+    # Change this to a strong admin password
+    ADMIN_PASSWORD=YourSecurePassword123!
+
+    # Server port (default is fine for local testing)
+    PORT=3000
+
+    # Set to production for live deployment
+    NODE_ENV=development
+    ```
+
+    <Warning>
+    **Security:** Change `ADMIN_PASSWORD` to something secure. This will be used to create your admin account.
+    </Warning>
+  </Step>
+</Steps>
+
+## Step 2: Start the Server
+
+```bash
+npm start
+```
+
+You should see output like:
+
+```
+Conectado a la base de datos SQLite [backend/database/mfcalidad.sqlite].
+SQLite optimizado: WAL mode, Synchronous NORMAL, Foreign Keys ON.
+Servidor industrial corriendo en el puerto 3000 [Mode: development]
+```
+
+<Check>
+Server is running! Keep this terminal window open.
+</Check>
+
+## Step 3: Bootstrap the System
+
+On first run, you must create the admin account:
+
+<Steps>
+  <Step title="Navigate to the bootstrap page">
+    Open your browser to: **http://localhost:3000/bootstrap.html**
+  </Step>
+
+  <Step title="Enter your admin password">
+    Use the `ADMIN_PASSWORD` you set in your `.env` file.
+  </Step>
+
+  <Step title="Set your new admin password">
+    Enter a new secure password for ongoing admin access.
+  </Step>
+
+  <Step title="Confirm bootstrap">
+    Click "Inicializar Sistema". You'll see a success message and be redirected to login.
+  </Step>
+</Steps>
+
+<Note>
+Bootstrap can only be performed once. After completion, the endpoint is permanently disabled for security.
+</Note>
+
+## Step 4: Log In and Explore
+
+<Steps>
+  <Step title="Navigate to login">
+    Go to: **http://localhost:3000/login.html**
+  </Step>
+
+  <Step title="Log in as admin">
+    - **Username:** `admin`
+    - **Password:** Your new admin password from bootstrap
+  </Step>
+
+  <Step title="View the dashboard">
+    You'll land on the main dashboard showing shift status and production processes.
+  </Step>
+</Steps>
+
+## Step 5: Open Your First Shift
+
+Production tracking is organized by shifts (turnos). Let's open one:
+
+<Steps>
+  <Step title="Check shift status">
+    The dashboard shows the current shift (T1, T2, or T3) and whether a shift log (bitácora) is open.
+  </Step>
+
+  <Step title="Open a shift log">
+    Click **"Abrir Bitácora"** to start tracking for the current shift.
+
+    The system will:
+    - Auto-detect the current shift based on time
+    - Set the operational date
+    - Assign you as the inspector
+  </Step>
+
+  <Step title="Navigate to a process">
+    Click on any production process (e.g., "Extrusor PP", "Telares") to begin recording data.
+  </Step>
+</Steps>
+
+## Step 6: Record Your First Production
+
+<Steps>
+  <Step title="Start with quality validation">
+    PROD-SYS enforces a quality-first workflow:
+    1. Click **"Registrar Calidad"**
+    2. Enter quality parameter values (e.g., width, thickness)
+    3. Mark results as "Cumple" (Pass) or "Rechazo" (Reject)
+    4. Save quality samples
+  </Step>
+
+  <Step title="Record production">
+    Once quality is validated:
+    1. Click **"Registrar Producción"**
+    2. Select the production order
+    3. Enter quantity produced
+    4. Add any observations
+    5. Save production record
+  </Step>
+
+  <Step title="View process status">
+    Return to the dashboard. You'll see your process marked as **🟢 Completo** (Complete).
+  </Step>
+</Steps>
+
+## What's Next?
+
+<CardGroup cols={2}>
+  <Card title="Create Production Orders" icon="clipboard-list" href="/guides/production-orders">
+    Learn how to create and manage production orders
+  </Card>
+
+  <Card title="Quality Control" icon="shield-check" href="/guides/quality-batches">
+    Understand quality batches and sample tracking
+  </Card>
+
+  <Card title="Personnel Setup" icon="users" href="/admin/user-management">
+    Add users and assign roles
+  </Card>
+
+  <Card title="API Integration" icon="code" href="/api/auth/login">
+    Integrate PROD-SYS with external systems
+  </Card>
+</CardGroup>
+
+## Common First-Time Questions
+
+<AccordionGroup>
+  <Accordion title="How do I create a production order?">
+    You have two options:
+    
+    1. **Manual Creation:** Navigate to "Órdenes" in the sidebar and click "Nueva Orden"
+    2. **SAP Import:** Use "Importar desde SAP" to batch import orders from an Excel file
+    
+    See the [Production Orders Guide](/guides/production-orders) for details.
+  </Accordion>
+
+  <Accordion title="What are the shift times?">
+    PROD-SYS uses a three-shift schedule:
+    - **T1 (Day):** 07:00 - 15:00
+    - **T2 (Afternoon):** 15:00 - 23:00  
+    - **T3 (Night):** 23:00 - 07:00 (next day)
+    
+    The system automatically detects the current shift.
+  </Accordion>
+
+  <Accordion title="Can I close a shift with incomplete data?">
+    No. PROD-SYS enforces data completeness:
+    - All active processes must have quality samples
+    - All active processes must have production records
+    - Processes with activity must have assigned personnel
+    
+    This ensures traceability and compliance.
+  </Accordion>
+
+  <Accordion title="How do I add more users?">
+    1. Navigate to the "Personal" section
+    2. Click "Registrar Personal" to add a person to your organization
+    3. Assign a system role (e.g., Operario, Supervisor)
+    4. The person can now log in and use the system
+    
+    See [User Management](/admin/user-management) for details.
+  </Accordion>
+</AccordionGroup>
+
+## Development Mode
+
+<Tip>
+**For Testing Only:** Set `DISABLE_AUTH_CHECKS=true` in your `.env` to bypass permission checks during development. 
+
+<Warning>
+Never use this setting in production!
+</Warning>
+</Tip>
+
+## Troubleshooting
+
+### "Bootstrap already completed"
+
+Bootstrap can only run once. If you need to reset:
+
+```bash
+sqlite3 backend/database/mfcalidad.sqlite "UPDATE system_config SET value = '0' WHERE key = 'bootstrap_completed';"
+```
+
+Then restart the server.
+
+### "Database is locked"
+
+This usually means another process is accessing the database. Restart the server or check for stale lock files:
+
+```bash
+rm backend/database/mfcalidad.sqlite-shm
+rm backend/database/mfcalidad.sqlite-wal
+```
+
+### Port 3000 is in use
+
+Change the port in your `.env` file:
+
+```bash
+PORT=3001
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Full Installation Guide" icon="download" href="/installation">
+    Production deployment, Docker, PM2, and more
+  </Card>
+
+  <Card title="Core Features" icon="star" href="/features/production-management">
+    Deep dive into production management features
+  </Card>
+
+  <Card title="User Guides" icon="book" href="/guides/shift-logs">
+    Step-by-step workflows for common tasks
+  </Card>
+
+  <Card title="Configuration" icon="gear" href="/admin/configuration">
+    Customize PROD-SYS for your operations
+  </Card>
+</CardGroup>

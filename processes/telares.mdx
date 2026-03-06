@@ -1,0 +1,419 @@
+---
+title: Telares (Weaving)
+description: Circular weaving process that transforms polypropylene tape into circular woven fabric
+---
+
+## Overview
+
+Telares (Process ID: 2) is the weaving process that converts polypropylene tape from extruders into circular woven fabric using high-speed circular looms. This process is critical in the production chain as it transforms raw tape material into the structural foundation for industrial bags.
+
+### Process Characteristics
+
+- **Process Type**: Order-based production
+- **Production Unit**: meters
+- **Product**: Circular polypropylene woven fabric
+- **Machines**: 13 looms (T01 through T13)
+- **Order Pattern**: `2\d{6}` (e.g., 2000123)
+- **Production Target**: 1,000 meters per loom per shift
+
+### What This Process Does
+
+The Telares process:
+- **Receives**: Polypropylene tape bobbins (warp and weft) from Extrusor PP (Process 1)
+- **Transforms**: Tape bobbins → Circular woven fabric rolls
+- **Delivers**: Identified fabric rolls ready for lamination (Process 3)
+- **Method**: High-speed circular weaving on dedicated looms
+
+## Production Flow
+
+### Upstream Dependencies
+
+Telares consumes **lots** (lotes) from Extrusor PP:
+- Each loom must declare which extruder lots it's consuming per shift
+- Multiple lots can be consumed simultaneously (e.g., two colors, or lot changeover mid-shift)
+- Lot consumption is tracked via `telar_consumo_lote` table
+
+### Downstream Consumers
+
+Telares output feeds into:
+- **Laminado (Process 3)**: Main downstream process for coating fabric
+
+### Production Tracking Method
+
+**Accumulated Counter Method** (`telares.service.js:159-166`):
+
+```javascript
+reglasProduccion: {
+  metodo: 'diferencia_acumulado_contador',
+  descripcion: 'Each loom has a meter counter that resets January 1st...',
+  unidad: 'meters',
+  resetAnual: true,
+  registroPorCambioDeOrden: true
+}
+```
+
+Production is calculated as the difference between:
+- Current accumulated counter reading
+- Previous shift's accumulated counter
+- Counter resets annually on January 1st (or nearest restart date)
+
+## Data Structures
+
+### Key Tables
+
+#### registros_trabajo
+Tracks production output per shift per loom:
+```javascript
+{
+  linea_ejecucion_id: FK,
+  bitacora_id: FK,
+  maquina_id: FK (loom T01-T13),
+  cantidad_producida: meters (calculated from counter diff),
+  merma_kg: waste in kg,
+  observaciones: text,
+  parametros: JSON {
+    acumulado_contador: integer
+  }
+}
+```
+
+#### calidad_muestras
+Quality samples for critical parameters:
+- **ancho_tela** (fabric width): 4 samples per shift, tolerance ±0.25 inches
+- **construccion_urdido** (warp construction): threads per inch
+- **construccion_trama** (weft construction): threads per inch
+- **color_urdido** / **color_trama**: Pass/Fail verification
+
+#### calidad_telares_visual
+Visual defects tracked per roll:
+- `DEF-01`: Incorrect tapes (wrong denier, width, or color)
+- `DEF-02`: Torn fabric (breaks during weaving)
+- `DEF-03`: Poorly wound roll (deformations, irregular edges)
+
+#### telar_consumo_lote
+Lot consumption traceability:
+```javascript
+{
+  registro_trabajo_id: FK,
+  maquina_id: FK (loom),
+  bitacora_id: FK,
+  lote_id: FK (from Extrusor PP)
+}
+```
+
+### Process Contract (`TelarContract.js:1-236`)
+
+```javascript
+processId: 2
+nombre: 'Telares'
+unidadProduccion: 'metros'
+patronCodigoOrden: '2\\d{6}'
+maquinasPermitidas: ['T01', 'T02', ..., 'T13']
+```
+
+## Quality Parameters
+
+### Critical Parameters
+
+#### 1. Fabric Width (ancho_tela)
+- **Unit**: inches
+- **Tolerance**: ±0.25 inches (fixed)
+- **Sampling**: 4 measurements per shift (hours 2, 4, 6, 8)
+- **Nominal**: From active production order
+- **Input Format**: Fractions of 1/8 (e.g., "12 1/8", "12 1/2")
+
+#### 2. Warp Construction (construccion_urdido)
+- **Unit**: threads per inch
+- **Sampling**: Once per shift or when order changes
+- **Validation**: Must match order specification exactly
+
+#### 3. Weft Construction (construccion_trama)
+- **Unit**: threads per inch  
+- **Sampling**: Once per shift or when order changes
+- **Validation**: Must match order specification exactly
+
+#### 4. Color Verification
+- **Parameters**: color_urdido, color_trama
+- **Type**: Pass/Fail
+- **Frequency**: Per order change + once per shift
+- **Critical**: If color fails, **mandatory stop** until corrected
+
+### Sampling Frequency (`TelarContract.js:118-137`)
+
+```javascript
+frecuenciaMuestreo: {
+  ancho: {
+    muestrasMinTurno: 4,
+    distribucion: [
+      { indice: 1, momento: 'hora_2_del_turno' },
+      { indice: 2, momento: 'hora_4_del_turno' },
+      { indice: 3, momento: 'hora_6_del_turno' },
+      { indice: 4, momento: 'hora_8_del_turno' }
+    ],
+    omisionRequiereMotivo: true
+  },
+  construccion: {
+    muestrasMinTurno: 1,
+    momento: 'inicio_turno'
+  }
+}
+```
+
+## Business Logic
+
+### Personnel Assignment Rules (`telares.service.js:146-156`)
+
+**Strict validation enforced**:
+```javascript
+reglasAsignacionPersonal: {
+  pareja: { maxMaquinas: 5 },      // Operator + assistant: up to 5 looms
+  personaSola: { maxMaquinas: 3 }   // Single person: up to 3 looms
+}
+```
+
+The system **blocks save** if personnel limits are exceeded.
+
+### Annual Counter Reset (`telares.service.js:161-171`)
+
+Validation logic for legitimate counter resets:
+```javascript
+function esResetAnual(acumuladoNuevo, acumuladoAnterior, bitacoraFecha) {
+  if (acumuladoNuevo >= acumuladoAnterior) return false;
+  const esNuevoAño = añoActual > añoBitacora;
+  const esValorPequeño = acumuladoNuevo < (acumuladoAnterior * 0.1);
+  return esNuevoAño && esValorPequeño;
+}
+```
+
+New counter value must be < 10% of previous to be valid reset.
+
+### Lot Consumption Validation (`telares.service.js:205-224`)
+
+```javascript
+if (produccionTotal > 0 && lotes_consumidos.length === 0) {
+  throw new ValidationError(
+    'Debe declarar al menos un lote consumido cuando hay producción registrada.'
+  );
+}
+
+for (const lc of lotes_consumidos) {
+  const lote = await this.loteService.getById(lc.lote_id);
+  if (lote.estado === 'cerrado') {
+    throw new ValidationError(
+      `El lote ${lote.codigo_lote} está cerrado y no puede declararse como consumido.`
+    );
+  }
+}
+```
+
+### Color Non-Compliance (`telares.service.js:226-229`)
+
+```javascript
+const colorNoCumple = calidad.color.some(c => c.resultado === 'No cumple');
+if (colorNoCumple && paros.length === 0) {
+  throw new ValidationError('Un color fuera de especificación obliga a registrar un paro.');
+}
+```
+
+If color verification fails, a **downtime record is mandatory**.
+
+## API Endpoints
+
+### GET `/api/telares/resumen`
+Returns summary of all looms for a shift:
+```javascript
+[
+  {
+    id: 1,
+    codigo: 'T01',
+    ordenActiva: '2000123',
+    produccionTotal: 1050,
+    estado: 'Completo',
+    tieneAlertas: false
+  },
+  // ... T02 through T13
+]
+```
+
+**Implementation**: `telares.service.js:25-53`
+
+### GET `/api/telares/detalle/:maquinaId`
+Detailed data for a specific loom:
+```javascript
+{
+  maquina: { id: 1, codigo: 'T01' },
+  estado: 'Completo',
+  ultimoAcumulado: 125400,
+  lotes_consumidos: [
+    { lote_id: 15, codigo_lote: '1000056-003', proceso: 'Extrusor PP' }
+  ],
+  produccion: [
+    {
+      id: 42,
+      orden_id: 123,
+      codigo_orden: '2000123',
+      acumulado_contador: 126450,
+      cantidad_producida: 1050,
+      desperdicio_kg: 5.2
+    }
+  ],
+  calidad: {
+    ancho: [ /* 4 width measurements */ ],
+    construccion: [ /* warp & weft counts */ ],
+    color: [ /* color verifications */ ]
+  },
+  visual: [ /* defect records */ ],
+  paros: [ /* downtime events */ ],
+  especificaciones_orden: {
+    ancho_nominal: 22.5,
+    construccion_urdido: 12,
+    construccion_trama: 11,
+    color_urdido: 'Blanco',
+    color_trama: 'Blanco'
+  }
+}
+```
+
+**Implementation**: `telares.service.js:55-142`
+
+### POST `/api/telares/guardar`
+Saves shift production data:
+
+**Request Body**:
+```javascript
+{
+  bitacora_id: 42,
+  maquina_id: 1,
+  produccion: [
+    {
+      orden_id: 123,
+      acumulado_contador: 126450,
+      desperdicio_kg: 5.2,
+      observaciones: ''
+    }
+  ],
+  calidad: {
+    ancho: [
+      { indice: 1, valor: 22.5, resultado: 'Cumple', valor_nominal: 22.5 },
+      { indice: 2, valor: 22.625, resultado: 'Cumple', valor_nominal: 22.5 },
+      { indice: 3, valor: 22.5, resultado: 'Cumple', valor_nominal: 22.5 },
+      { indice: 4, valor: 22.375, resultado: 'Cumple', valor_nominal: 22.5 }
+    ],
+    construccion: [
+      { parametro: 'construccion_urdido', valor: 12, resultado: 'Cumple', valor_nominal: 12 },
+      { parametro: 'construccion_trama', valor: 11, resultado: 'Cumple', valor_nominal: 11 }
+    ],
+    color: [
+      { parametro: 'color_urdido', valor: 'Blanco', resultado: 'Cumple', valor_nominal: 'Blanco' },
+      { parametro: 'color_trama', valor: 'Blanco', resultado: 'Cumple', valor_nominal: 'Blanco' }
+    ]
+  },
+  visual: [
+    {
+      orden_id: 123,
+      rollo_numero: '47-T-05',
+      tipo_defecto_id: 'DEF-02',
+      observacion: 'Rotura de cinta en zona central del rollo'
+    }
+  ],
+  paros: [],
+  observacion_advertencia: '',
+  lotes_consumidos: [
+    { lote_id: 15 }
+  ]
+}
+```
+
+**Response**:
+```javascript
+{
+  produccionTotal: 1050,
+  registroIds: [156]
+}
+```
+
+**Implementation**: `telares.service.js:144-406`  
+**Permission Required**: `MANAGE_QUALITY`
+
+## Machine Status States
+
+**Calculated in**: `telares.service.js:365-384`
+
+- **Sin datos**: No production or quality data recorded
+- **Parcial**: Some data recorded but incomplete
+- **Completo**: All required data present:
+  - Production OR downtime recorded
+  - 4 width measurements OR justification for omission
+  - 2 construction measurements
+  - 2+ color verifications
+- **Con desviación**: Complete data but quality parameters failed
+
+## Traceability
+
+### Roll Identification Format
+
+`{roll_number}-{loom_code}`
+
+Example: **47-T-05** = Roll #47 from Loom T05
+
+### Lot Consumption Chain
+
+Telares → Extrusor PP lots:
+```
+Extrusor PP produces lot: 1000056-003
+          ↓
+Telares consumes lot via telar_consumo_lote
+          ↓
+Produces fabric roll: 47-T-05
+          ↓
+Laminado consumes roll 47-T-05
+```
+
+## Operational Rules
+
+### Production Scenarios
+
+1. **Normal operation**: Register counter value at shift end
+2. **Order change mid-shift**: Register counter at changeover, then again at shift end
+3. **Zero production (full downtime)**: Still register current counter (equals previous) + mandatory downtime justification
+4. **Annual reset**: Counter resets to near-zero on January 1st or next startup
+
+### Stop Restrictions (`TelarContract.js:20-26`)
+
+```javascript
+restriccionesInicio: [
+  'Telar sin orden activa asignada',
+  'Rotura de cinta en urdimbre o trama',
+  'Falla mecánica del telar',
+  'Falta de materia prima (conos de cinta PP)',
+  'Cambio de orden en proceso'
+]
+```
+
+### Downtime Categories (`TelarContract.js:49-54`)
+
+- **Operational**: Order change, warp tying, roll change, cleaning
+- **Mechanical**: Broken shuttle, motor failure, sensor failure, cam misalignment
+- **Quality**: Width out of range, weaving defects, incorrect color
+- **External**: Material shortage, electrical failure, absenteeism
+
+## Impact of Variability (`TelarContract.js:60-63`)
+
+```javascript
+impactoVariabilidad: [
+  {
+    condicion: 'Variación de denier',
+    impacto: 'Afecta el gramaje de la tela y puede causar roturas frecuentes.'
+  },
+  {
+    condicion: 'Alta temperatura ambiente',
+    impacto: 'Afecta la elongación de la cinta y la estabilidad del tejido.'
+  }
+]
+```
+
+## Related Processes
+
+- **Upstream**: [Extrusor PP](/processes/extrusor-pp) (Process 1)
+- **Downstream**: [Laminado](/processes/laminado) (Process 3)
+- **Related**: [Production Orders](/quality/orders), [Lot Management](/quality/lots)

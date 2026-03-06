@@ -1,0 +1,475 @@
+---
+title: Quality Batch Management
+description: Creating, tracking, and managing production batches (lotes) for traceability
+---
+
+Quality batches (lotes) are the traceability units in PROD-SYS. They represent discrete production outputs that can be tracked, tested, and traced through the manufacturing process.
+
+## Understanding Batches
+
+A batch is created when production is recorded against an order:
+
+- **Batch Code**: `{codigo_orden}-{correlativo}`
+- **Example**: Order 2000145 → Batches 2000145-001, 2000145-002, 2000145-003
+- **Scope**: One batch per order + shift combination
+- **Lifecycle**: activo → pausado → cerrado
+
+### Why Batches Matter
+
+1. **Quality Control**: Batches are the unit of quality testing and hold/release decisions
+2. **Traceability**: Track materials from raw input to finished goods
+3. **Recall Management**: Identify and isolate specific production runs
+4. **Inventory Control**: Manage stock by discrete, testable units
+5. **Customer Shipments**: Ship and invoice by batch
+
+## Automatic Batch Generation
+
+Batches are created automatically during shift log recording.
+
+<Steps>
+  <Step title="Record Production">
+    During shift log (Bitácora de Turno), log production against an order:
+    - Select production order
+    - Enter quantity produced
+    - Save process data
+  </Step>
+  
+  <Step title="System Generates Batch">
+    The `generarOObtenerLote()` service method:
+    1. Checks if a batch already exists for this bitácora + orden
+    2. If yes: Returns existing batch
+    3. If no: Creates new batch:
+       - Calculates next correlativo (max + 1)
+       - Generates código_lote: `{codigo_orden}-{correlativo}`
+       - Sets estado: "activo"
+       - Links to bitácora_id and orden_produccion_id
+       - Records creation user and timestamp
+  </Step>
+  
+  <Step title="Batch Becomes Active">
+    The batch is now available for:
+    - Quality testing
+    - Consumption by downstream processes
+    - Inventory tracking
+    - Customer shipment
+  </Step>
+</Steps>
+
+<Note>
+Batches are created per order + bitácora (shift). If the same order runs across multiple shifts, each shift gets its own batch with incrementing correlativo.
+</Note>
+
+## Viewing Batches
+
+Navigate to **Control → Trazabilidad** or access the internal lotes module.
+
+### Batch List
+
+The batch table displays:
+
+| Column | Description |
+|--------|-------------|
+| Código Lote | Format: {orden}-{correlativo} |
+| Proceso | Source production process |
+| Orden | Linked production order (codigo_orden) |
+| Estado | activo, pausado, cerrado |
+| Acciones | View details, change status, traceability |
+
+### Filtering
+
+**Available batches only**: 
+```
+GET /api/lotes/disponibles
+```
+Returns batches with estado = "activo" or "pausado" (not "cerrado").
+
+**By order**:
+```
+GET /api/lotes/orden/:ordenId
+```
+Returns all batches for a specific production order.
+
+## Batch Status Management
+
+Batches move through a controlled lifecycle:
+
+### Active (activo)
+
+Initial state after creation:
+- Available for consumption by downstream processes
+- Quality testing in progress or completed
+- Can be used in production
+
+### Paused (pausado)
+
+Temporarily held:
+- Quality issue under investigation
+- Material verification pending
+- Customer specification review needed
+- Inventory hold for administrative reasons
+
+### Closed (cerrado)
+
+Final state:
+- All material consumed or shipped
+- Quality approved and documented
+- No longer available for use
+- **Irreversible status**
+
+### Changing Status
+
+<Steps>
+  <Step title="Navigate to Batch">
+    Find the batch in the lotes list and click "Acciones" → "Cambiar Estado".
+  </Step>
+  
+  <Step title="Select New Status">
+    Choose the target status:
+    - activo → pausado (hold batch)
+    - activo → cerrado (finalize batch)
+    - pausado → activo (release hold)
+    - pausado → cerrado (finalize held batch)
+    
+    Invalid transitions (e.g., cerrado → anything) are blocked.
+  </Step>
+  
+  <Step title="Provide Comment">
+    For pausado or cerrado status:
+    - **Comment is mandatory**
+    - Explain the reason for status change
+    - Include any test results, approvals, or justifications
+    
+    Example (pausado):
+    ```
+    Lote en espera de resultados de laboratorio externo.
+    Resistencia a la tracción fuera de especificación en muestra inicial.
+    Esperando contramuestra antes de liberar.
+    ```
+    
+    Example (cerrado):
+    ```
+    Lote completamente consumido en proceso de Laminado.
+    Total utilizado: 15,000 m² en turnos T1 y T2 del 25/01.
+    Calidad aprobada, sin rechazos.
+    ```
+  </Step>
+  
+  <Step title="Confirm Change">
+    Click **Confirmar**. The system:
+    - Validates the state transition
+    - Updates estado in lotes table
+    - Creates historial_estado_lote entry
+    - Logs change in audit trail
+    - Records changed_by username and timestamp
+  </Step>
+</Steps>
+
+<Warning>
+Batches in "cerrado" state cannot be reopened. Ensure all quality and inventory actions are complete before closing.
+</Warning>
+
+## Batch Consumption (Process Inputs)
+
+Downstream processes consume upstream batches:
+
+### Example: Telares Consuming Extrusor PP Output
+
+<Steps>
+  <Step title="Open Shift Log">
+    In Bitácora de Turno, navigate to Proceso 2 (Telares).
+  </Step>
+  
+  <Step title="Record Production">
+    Enter production data:
+    - Select weaving order
+    - Choose machine (T-01, T-02, etc.)
+    - Enter quantity produced
+  </Step>
+  
+  <Step title="Declare Input Batches">
+    Select which extruder batches were consumed:
+    - System queries available batches (estado = activo or pausado)
+    - Operator selects batches used on this machine
+    - Multiple batches can be selected
+  </Step>
+  
+  <Step title="Save Consumption">
+    The system:
+    - Creates consumo_lote_telar records linking:
+      - registro_trabajo_id (the production record)
+      - maquina_id (the weaving machine)
+      - bitacora_id (the shift)
+      - lote_id (each consumed batch)
+    - Records created_by user
+    - Builds traceability chain
+  </Step>
+</Steps>
+
+### Consumption Validation
+
+```javascript
+// From lote.service.js:74-84
+const lote = await this.loteRepository.findById(loteId);
+if (!lote) {
+  throw new ValidationError(`El lote con ID ${loteId} no existe.`);
+}
+if (lote.estado === 'cerrado') {
+  throw new ValidationError(
+    `El lote ${lote.codigo_lote} está cerrado y no puede ser declarado como consumido.`
+  );
+}
+```
+
+<Note>
+Only batches with estado "activo" or "pausado" can be consumed. Closed batches are blocked.
+</Note>
+
+## Special Batch Formats
+
+### Standard Format (Most Processes)
+
+Format: `{codigo_orden}-{correlativo}`
+
+Example:
+- Order: 1000234 (Extrusor PP)
+- Batches: 1000234-001, 1000234-002, 1000234-003
+
+Generated by: `generarOObtenerLote()`
+
+### Laminado Format (Custom)
+
+Format: `{codigo_rollo_entrada}-L{correlativo}`
+
+Example:
+- Input batch: 2000145-001 (fabric roll from Telares)
+- Laminated batches: 2000145-001-L1, 2000145-001-L2
+
+Generated by: `crearLoteDirecto()` with custom código_lote
+
+This preserves the input-output relationship in the batch code itself.
+
+## Batch History
+
+Every status change is recorded in `historial_estado_lote`:
+
+```javascript
+{
+  id: 1,
+  lote_id: 123,
+  estado_anterior: "activo",
+  estado_nuevo: "pausado",
+  comentario: "Esperando resultados de laboratorio",
+  changed_by: "supervisor1",
+  changed_at: "2024-01-25T15:30:00Z"
+}
+```
+
+### Viewing History
+
+<Steps>
+  <Step title="Access Batch Details">
+    Click on a batch in the lotes list.
+  </Step>
+  
+  <Step title="View History Tab">
+    Navigate to the "Historial" section.
+  </Step>
+  
+  <Step title="Review Changes">
+    See all status transitions:
+    - Timestamp of change
+    - User who made the change
+    - Previous and new status
+    - Comment explaining the change
+  </Step>
+</Steps>
+
+This provides complete audit trail for regulatory compliance and quality investigations.
+
+## Batch Traceability
+
+The traceability query links all related data:
+
+```javascript
+GET /api/lotes/:id/trazabilidad
+```
+
+Returns:
+
+```javascript
+{
+  lote: {  // Batch details
+    id: 123,
+    codigo_lote: "2000145-001",
+    orden_produccion_id: 456,
+    codigo_orden: "2000145",
+    bitacora_id: 789,
+    turno: "T1",
+    fecha_operativa: "2024-01-25",
+    estado: "activo"
+  },
+  consumos: [  // Where this batch was used
+    {
+      proceso_nombre: "Laminado",
+      maquina_nombre: "LAM-01",
+      turno: "T2",
+      fecha_operativa: "2024-01-25",
+      cantidad_producida: 8000,
+      orden_destino: "3000567"
+    }
+  ],
+  historial: [  // Status changes
+    {
+      estado_anterior: "activo",
+      estado_nuevo: "cerrado",
+      comentario: "Lote completamente consumido",
+      changed_by: "operator2",
+      changed_at: "2024-01-25T22:15:00Z"
+    }
+  ]
+}
+```
+
+<Steps>
+  <Step title="Navigate to Trazabilidad">
+    Go to **Control → Trazabilidad**.
+  </Step>
+  
+  <Step title="Enter Batch Code">
+    Input the código_lote (e.g., "2000145-001").
+  </Step>
+  
+  <Step title="View Complete Chain">
+    The system displays:
+    - **Upstream**: Raw materials or input batches consumed to make this batch
+    - **This Batch**: Production details (order, shift, date, quantity, quality results)
+    - **Downstream**: Where this batch was consumed and what output batches it produced
+    - **Status History**: All state transitions with timestamps and users
+  </Step>
+</Steps>
+
+## Integration with Quality Control
+
+Batches are the unit of quality sampling:
+
+### Quality Sample Linkage
+
+1. Production creates batch (lote)
+2. Quality team takes samples from batch
+3. Samples are tested and recorded in `muestras` table
+4. Samples linked to batch via bitacora_id + orden_produccion_id
+5. Quality results determine batch disposition:
+   - **Cumple**: Batch approved, remains activo
+   - **Rechazo**: Batch held, status → pausado
+   - **En espera**: Batch held pending retest
+
+### Quality Hold Workflow
+
+<Steps>
+  <Step title="Quality Rejection Detected">
+    During shift log recording, a quality sample returns "Rechazo".
+  </Step>
+  
+  <Step title="Shift Status Updates">
+    Process status becomes "🔴 Revisión", requiring justification.
+  </Step>
+  
+  <Step title="Supervisor Reviews">
+    Supervisor evaluates:
+    - Sample results
+    - Batch disposition (rework, scrap, conditional release)
+    - Corrective actions
+  </Step>
+  
+  <Step title="Update Batch Status">
+    Based on decision:
+    - **Rework possible**: Keep activo, add observations
+    - **Investigation needed**: Change to pausado with comment
+    - **Scrapped**: Change to cerrado with comment
+  </Step>
+  
+  <Step title="Document in System">
+    All decisions recorded in:
+    - Batch status and comment
+    - Historial_estado_lote
+    - Bitácora observations
+    - Audit trail
+  </Step>
+</Steps>
+
+## Best Practices
+
+<Check>Let the system generate batch codes automatically - don't override correlativo</Check>
+<Check>Update batch status immediately when quality decisions are made</Check>
+<Check>Provide detailed comments for all status changes (especially pausado and cerrado)</Check>
+<Check>Close batches promptly when fully consumed or shipped</Check>
+<Check>Use batch consumption tracking to validate material usage against production</Check>
+<Check>Review batch traceability before shipment to ensure quality compliance</Check>
+
+<Warning>Never close a batch that may still be needed for production or has open quality issues.</Warning>
+
+## Reporting and KPIs
+
+### Batch Yield Analysis
+
+Compare:
+- Input batch quantities (from upstream process)
+- Output quantities (from downstream process)
+- Calculate material utilization %
+
+### Quality Performance
+
+Track:
+- % batches with zero quality rejections
+- Average time from production to quality approval
+- % batches requiring hold or rework
+
+### Inventory Accuracy
+
+Reconcile:
+- Batches created (from registros_trabajo)
+- Batches consumed (from consumo_lote tables)
+- Batches in activo state (current inventory)
+
+## Troubleshooting
+
+### Batch Not Generated
+
+**Issue**: Production recorded but no batch created
+
+- Check if production was saved successfully
+- Verify orden_produccion_id is valid
+- Ensure bitacora_id is present
+- Review application logs for errors
+
+### Cannot Consume Batch
+
+**Error**: "El lote está cerrado y no puede ser declarado como consumido"
+
+- The batch status is "cerrado"
+- Cannot reopen closed batches
+- Use a different batch or contact supervisor
+
+### Duplicate Batch Codes
+
+**Issue**: Two batches with same código_lote
+
+- Should never happen - indicates data integrity issue
+- Check correlativo calculation logic
+- Review database constraints
+- Contact system administrator
+
+### Missing Traceability Data
+
+**Issue**: Batch shows no consumption records
+
+- Batch may not have been used yet
+- Downstream process may not have declared consumption
+- Check if consumo_lote records were created
+- Verify process contract supports consumption tracking
+
+## Related Topics
+
+- [Shift Logs](/guides/shift-logs) - Recording production that generates batches
+- [Traceability](/guides/traceability) - Following batches through production chain
+- [Production Orders](/guides/production-orders) - Orders that batches fulfill

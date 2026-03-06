@@ -1,0 +1,349 @@
+---
+title: 'Recursos'
+description: 'API endpoints for managing production resources including materials, supplies, and consumables'
+---
+
+## Overview
+
+The Recursos API manages the catalog of production resources tracked within the PROD-SYS traceability system. Resources represent any material, supply, or consumable used in production processes (raw materials, chemicals, packaging materials, etc.).
+
+Resources are consumed during production and tracked via the [Consumos API](/api/resources/consumos).
+
+## Base URL
+
+```
+/api/recursos
+```
+
+---
+
+## List All Resources
+
+<CodeGroup>
+```bash GET /api/recursos
+curl -X GET https://api.example.com/api/recursos \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+Retrieves all resources in the system, ordered alphabetically by name.
+
+### Response
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if the request was successful
+</ResponseField>
+
+<ResponseField name="data" type="array" required>
+  Array of resource objects
+  
+  <Expandable title="Resource Object">
+    <ResponseField name="id" type="integer" required>
+      Unique resource identifier
+    </ResponseField>
+    
+    <ResponseField name="codigo" type="string" required>
+      Internal resource code (unique identifier)
+    </ResponseField>
+    
+    <ResponseField name="nombre" type="string" required>
+      Resource name
+    </ResponseField>
+    
+    <ResponseField name="descripcion" type="string">
+      Detailed resource description
+    </ResponseField>
+    
+    <ResponseField name="tipo" type="string">
+      Resource type classification (e.g., "Materia Prima", "Químico", "Material de Empaque")
+    </ResponseField>
+    
+    <ResponseField name="unidad_medida" type="string">
+      Unit of measurement (e.g., "kg", "litros", "unidades")
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Response Example
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "codigo": "PP-LDPE-001",
+      "nombre": "Polipropileno LDPE",
+      "descripcion": "Resina de polipropileno de baja densidad para película",
+      "tipo": "Materia Prima",
+      "unidad_medida": "kg"
+    },
+    {
+      "id": 2,
+      "codigo": "TINTA-AZ-001",
+      "nombre": "Tinta Azul Pantone 2935C",
+      "descripcion": "Tinta para impresión flexográfica",
+      "tipo": "Químico",
+      "unidad_medida": "litros"
+    },
+    {
+      "id": 3,
+      "codigo": "ADH-LAM-001",
+      "nombre": "Adhesivo para Laminado",
+      "descripcion": "Adhesivo base agua para laminación",
+      "tipo": "Químico",
+      "unidad_medida": "kg"
+    }
+  ]
+}
+```
+
+---
+
+## Create Resource
+
+<CodeGroup>
+```bash POST /api/recursos
+curl -X POST https://api.example.com/api/recursos \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "codigo": "PP-LDPE-002",
+    "nombre": "Polietileno Alta Densidad",
+    "descripcion": "Resina HDPE para sacos tejidos",
+    "tipo": "Materia Prima",
+    "unidad_medida": "kg"
+  }'
+```
+</CodeGroup>
+
+Creates a new resource in the system catalog.
+
+**Required Permission:** `MANAGE_PRODUCTION`
+
+### Request Body
+
+<ParamField path="codigo" type="string" required>
+  Unique internal code for the resource. Must be unique across all resources.
+</ParamField>
+
+<ParamField path="nombre" type="string" required>
+  Human-readable resource name
+</ParamField>
+
+<ParamField path="descripcion" type="string">
+  Detailed description of the resource, including specifications or usage notes
+</ParamField>
+
+<ParamField path="tipo" type="string">
+  Resource classification type. Common values:
+  - `Materia Prima` - Raw materials
+  - `Químico` - Chemicals (inks, adhesives, solvents)
+  - `Material de Empaque` - Packaging materials
+  - `Insumo` - General supplies
+</ParamField>
+
+<ParamField path="unidad_medida" type="string">
+  Unit of measurement for consumption tracking. Common values:
+  - `kg` - Kilograms
+  - `litros` - Liters
+  - `unidades` - Units/pieces
+  - `metros` - Meters
+</ParamField>
+
+### Response
+
+Returns the created resource object with the generated `id`.
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if the creation was successful
+</ResponseField>
+
+<ResponseField name="data" type="object" required>
+  The created resource object including the auto-generated `id`
+</ResponseField>
+
+### Response Example
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": 4,
+    "codigo": "PP-LDPE-002",
+    "nombre": "Polietileno Alta Densidad",
+    "descripcion": "Resina HDPE para sacos tejidos",
+    "tipo": "Materia Prima",
+    "unidad_medida": "kg"
+  }
+}
+```
+
+---
+
+## Data Model
+
+### Resource Schema
+
+The `RECURSO` table structure:
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | INTEGER | PRIMARY KEY, AUTOINCREMENT | Unique resource identifier |
+| `codigo` | TEXT | UNIQUE | Internal resource code |
+| `nombre` | TEXT | - | Resource name |
+| `descripcion` | TEXT | - | Detailed description |
+| `tipo` | TEXT | - | Resource type classification |
+| `unidad_medida` | TEXT | - | Unit of measurement |
+
+### Relationships
+
+- **Consumos**: Resources are consumed in production through the `CONSUMO` table
+- One resource can have many consumption records
+- See [Consumos API](/api/resources/consumos) for tracking resource usage
+
+---
+
+## Usage Examples
+
+### Creating a New Raw Material
+
+```bash
+curl -X POST https://api.example.com/api/recursos \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "codigo": "RESINA-PP-550",
+    "nombre": "Polipropileno Homopolímero H550",
+    "descripcion": "Resina PP homopolímero, MFI 5.5, para extrusión de película",
+    "tipo": "Materia Prima",
+    "unidad_medida": "kg"
+  }'
+```
+
+### Creating a Chemical Resource
+
+```bash
+curl -X POST https://api.example.com/api/recursos \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "codigo": "TINTA-NEGRO-001",
+    "nombre": "Tinta Negra Flexográfica",
+    "descripcion": "Tinta base agua para impresión flexográfica, secado rápido",
+    "tipo": "Químico",
+    "unidad_medida": "litros"
+  }'
+```
+
+### Listing All Resources
+
+```bash
+curl -X GET https://api.example.com/api/recursos \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+---
+
+## Error Handling
+
+### Common Error Responses
+
+#### 400 Bad Request
+
+```json
+{
+  "success": false,
+  "error": "Missing required field: codigo"
+}
+```
+
+Returned when required fields are missing or validation fails.
+
+#### 401 Unauthorized
+
+```json
+{
+  "success": false,
+  "error": "Authentication required"
+}
+```
+
+Returned when no valid authentication token is provided.
+
+#### 403 Forbidden
+
+```json
+{
+  "success": false,
+  "error": "Insufficient permissions. Required: MANAGE_PRODUCTION"
+}
+```
+
+Returned when the user lacks the `MANAGE_PRODUCTION` permission (POST endpoint only).
+
+#### 409 Conflict
+
+```json
+{
+  "success": false,
+  "error": "Resource with codigo 'PP-LDPE-001' already exists"
+}
+```
+
+Returned when attempting to create a resource with a duplicate `codigo`.
+
+#### 500 Internal Server Error
+
+```json
+{
+  "success": false,
+  "error": "Database error occurred"
+}
+```
+
+Returned when an unexpected server error occurs.
+
+---
+
+## Best Practices
+
+### Resource Codes
+
+- Use consistent naming conventions for `codigo` values
+- Include resource type prefix (e.g., `PP-` for polypropylene, `TINTA-` for inks)
+- Make codes human-readable and searchable
+- Keep codes unique and meaningful
+
+### Resource Types
+
+Standardize `tipo` values across your organization:
+
+- **Materia Prima**: Raw polymers, resins, base materials
+- **Químico**: Inks, adhesives, solvents, additives
+- **Material de Empaque**: Packaging materials, labels, boxes
+- **Insumo**: General supplies and consumables
+
+### Units of Measurement
+
+Use consistent units within each resource category:
+
+- Solids/powders: `kg`
+- Liquids: `litros`
+- Discrete items: `unidades`
+- Linear materials: `metros`
+
+### Integration with Consumos
+
+Resources must be created before they can be consumed. When recording production:
+
+1. Create resources in the catalog (this API)
+2. Record consumption during production ([Consumos API](/api/resources/consumos))
+3. Track consumption against specific work records (`registro_trabajo_id`)
+
+---
+
+## Related Endpoints
+
+- [Consumos API](/api/resources/consumos) - Track resource consumption in production
+- [Registros de Trabajo](/api/production/bitacora) - Work records where resources are consumed

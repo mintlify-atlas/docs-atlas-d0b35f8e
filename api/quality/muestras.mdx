@@ -1,0 +1,545 @@
+---
+title: 'Muestras'
+description: 'API de registro y consulta de muestras de control de calidad'
+---
+
+## Introducción
+
+Las muestras representan análisis de control de calidad realizados durante el proceso productivo. Cada muestra puede estar asociada a un lote, bitácora, proceso y máquina específicos, permitiendo trazabilidad completa de los resultados de calidad.
+
+**Campos clave:**
+- `codigo_muestra`: Identificador único de la muestra
+- `lote_id`: Lote asociado (opcional, permite vincular con producción)
+- `resultado`: Resultado del análisis (ej: "aprobado", "rechazado", "condicional")
+- `parametro`: Parámetro medido (ej: "tensión", "humedad", "resistencia")
+- `valor`: Valor medido en el análisis
+- `valor_nominal`: Valor esperado o de referencia
+
+**Relaciones:**
+- Vinculada a un lote (`lote_id`) para trazabilidad con producción
+- Asociada a una bitácora de turno (`bitacora_id`)
+- Relacionada con un proceso específico (`proceso_id`)
+- Puede estar ligada a una máquina (`maquina_id`)
+
+---
+
+## Listar Muestras por Lote
+
+<RequestExample>
+
+```bash Obtener muestras de un lote
+curl -X GET https://api.prod-sys.com/api/muestras/lote/45 \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json"
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json Respuesta exitosa
+{
+  "status": "success",
+  "data": [
+    {
+      "id": 201,
+      "codigo_muestra": "M-2025-001-003-001",
+      "fecha_analisis": "2025-11-15",
+      "lote_id": 45,
+      "bitacora_id": 89,
+      "proceso_id": 3,
+      "maquina_id": 12,
+      "resultado": "aprobado",
+      "valor": "850",
+      "parametro": "tensión",
+      "valor_nominal": "800-900",
+      "usuario_modificacion": "operador.calidad",
+      "fecha_modificacion": "2025-11-15T09:30:00Z"
+    },
+    {
+      "id": 202,
+      "codigo_muestra": "M-2025-001-003-002",
+      "fecha_analisis": "2025-11-15",
+      "lote_id": 45,
+      "bitacora_id": 89,
+      "proceso_id": 3,
+      "maquina_id": 12,
+      "resultado": "rechazado",
+      "valor": "12.5",
+      "parametro": "humedad",
+      "valor_nominal": "8-10",
+      "usuario_modificacion": "operador.calidad",
+      "fecha_modificacion": "2025-11-15T11:45:00Z"
+    },
+    {
+      "id": 203,
+      "codigo_muestra": "M-2025-001-003-003",
+      "fecha_analisis": "2025-11-15",
+      "lote_id": 45,
+      "bitacora_id": 90,
+      "proceso_id": 5,
+      "maquina_id": null,
+      "resultado": "aprobado",
+      "valor": "95.2",
+      "parametro": "resistencia",
+      "valor_nominal": ">=90",
+      "usuario_modificacion": "laboratorio.turno1",
+      "fecha_modificacion": "2025-11-15T14:20:00Z"
+    }
+  ]
+}
+```
+
+</ResponseExample>
+
+**GET** `/api/muestras/lote/:id`
+
+Retorna todas las muestras de control de calidad asociadas a un lote específico.
+
+### Path Parameters
+
+<ParamField path="id" type="integer" required>
+  ID del lote
+</ParamField>
+
+### Headers
+
+<ParamField header="Authorization" type="string" required>
+  Token de autenticación Bearer
+</ParamField>
+
+### Respuesta
+
+<ResponseField name="status" type="string">
+  Estado de la respuesta (`success`)
+</ResponseField>
+
+<ResponseField name="data" type="array">
+  Array de objetos muestra
+  
+  <ResponseField name="id" type="integer">
+    ID único de la muestra
+  </ResponseField>
+  
+  <ResponseField name="codigo_muestra" type="string">
+    Código identificador único de la muestra
+  </ResponseField>
+  
+  <ResponseField name="fecha_analisis" type="string">
+    Fecha en que se realizó el análisis (YYYY-MM-DD)
+  </ResponseField>
+  
+  <ResponseField name="lote_id" type="integer" optional>
+    ID del lote asociado
+  </ResponseField>
+  
+  <ResponseField name="bitacora_id" type="integer" optional>
+    ID de la bitácora de turno donde se tomó la muestra
+  </ResponseField>
+  
+  <ResponseField name="proceso_id" type="integer" optional>
+    ID del proceso productivo asociado
+  </ResponseField>
+  
+  <ResponseField name="maquina_id" type="integer" optional>
+    ID de la máquina donde se tomó la muestra
+  </ResponseField>
+  
+  <ResponseField name="resultado" type="string">
+    Resultado del análisis (ej: "aprobado", "rechazado", "condicional")
+  </ResponseField>
+  
+  <ResponseField name="valor" type="string">
+    Valor medido en el análisis
+  </ResponseField>
+  
+  <ResponseField name="parametro" type="string">
+    Parámetro analizado (ej: "tensión", "humedad", "resistencia")
+  </ResponseField>
+  
+  <ResponseField name="valor_nominal" type="string">
+    Valor esperado o rango de referencia
+  </ResponseField>
+  
+  <ResponseField name="usuario_modificacion" type="string">
+    Usuario que registró la muestra
+  </ResponseField>
+  
+  <ResponseField name="fecha_modificacion" type="string">
+    Timestamp de creación/modificación del registro
+  </ResponseField>
+</ResponseField>
+
+---
+
+## Crear Nueva Muestra
+
+<RequestExample>
+
+```bash Crear muestra
+curl -X POST https://api.prod-sys.com/api/muestras \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "codigo_muestra": "M-2025-001-003-004",
+    "fecha_analisis": "2025-11-16",
+    "lote_id": 45,
+    "bitacora_id": 91,
+    "proceso_id": 3,
+    "maquina_id": 12,
+    "resultado": "aprobado",
+    "valor": "875",
+    "parametro": "tensión",
+    "valor_nominal": "800-900",
+    "usuario_modificacion": "operador.calidad"
+  }'
+```
+
+```bash Crear muestra sin lote
+curl -X POST https://api.prod-sys.com/api/muestras \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "codigo_muestra": "M-GEN-2025-056",
+    "fecha_analisis": "2025-11-16",
+    "bitacora_id": 91,
+    "proceso_id": 7,
+    "resultado": "condicional",
+    "valor": "15.8",
+    "parametro": "pH",
+    "valor_nominal": "14-16",
+    "usuario_modificacion": "laboratorio.quimico"
+  }'
+```
+
+```bash Crear muestra con fecha automática
+curl -X POST https://api.prod-sys.com/api/muestras \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "codigo_muestra": "M-2025-001-004-001",
+    "lote_id": 46,
+    "bitacora_id": 92,
+    "proceso_id": 4,
+    "maquina_id": 8,
+    "resultado": "aprobado",
+    "valor": "520",
+    "parametro": "velocidad",
+    "valor_nominal": "500-550",
+    "usuario_modificacion": "operador.proceso"
+  }'
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json Respuesta exitosa
+{
+  "status": "success",
+  "data": {
+    "id": 204,
+    "codigo_muestra": "M-2025-001-003-004",
+    "fecha_analisis": "2025-11-16",
+    "lote_id": 45,
+    "bitacora_id": 91,
+    "proceso_id": 3,
+    "maquina_id": 12,
+    "resultado": "aprobado",
+    "valor": "875",
+    "parametro": "tensión",
+    "valor_nominal": "800-900",
+    "usuario_modificacion": "operador.calidad",
+    "fecha_modificacion": "2025-11-16T08:15:00Z"
+  }
+}
+```
+
+</ResponseExample>
+
+**POST** `/api/muestras`
+
+Crea un nuevo registro de muestra de control de calidad.
+
+### Headers
+
+<ParamField header="Authorization" type="string" required>
+  Token de autenticación Bearer
+</ParamField>
+
+<ParamField header="Content-Type" type="string" required>
+  `application/json`
+</ParamField>
+
+### Body Parameters
+
+<ParamField body="codigo_muestra" type="string" required>
+  Código único identificador de la muestra
+</ParamField>
+
+<ParamField body="fecha_analisis" type="string">
+  Fecha del análisis en formato YYYY-MM-DD. Si no se proporciona, se usa la fecha actual
+</ParamField>
+
+<ParamField body="lote_id" type="integer">
+  ID del lote asociado (opcional, permite vincular con producción)
+</ParamField>
+
+<ParamField body="bitacora_id" type="integer">
+  ID de la bitácora de turno donde se tomó la muestra
+</ParamField>
+
+<ParamField body="proceso_id" type="integer">
+  ID del proceso productivo asociado
+</ParamField>
+
+<ParamField body="maquina_id" type="integer">
+  ID de la máquina donde se tomó la muestra (opcional)
+</ParamField>
+
+<ParamField body="resultado" type="string" required>
+  Resultado del análisis. Valores típicos: "aprobado", "rechazado", "condicional"
+</ParamField>
+
+<ParamField body="valor" type="string" required>
+  Valor medido en el análisis
+</ParamField>
+
+<ParamField body="parametro" type="string" required>
+  Parámetro analizado (ej: "tensión", "humedad", "resistencia", "pH")
+</ParamField>
+
+<ParamField body="valor_nominal" type="string" required>
+  Valor esperado o rango de referencia
+</ParamField>
+
+<ParamField body="usuario_modificacion" type="string" required>
+  Usuario que registra la muestra
+</ParamField>
+
+### Permisos Requeridos
+
+- `MANAGE_QUALITY`: Gestionar registros de calidad
+
+### Respuesta
+
+<ResponseField name="status" type="string">
+  Estado de la respuesta (`success`)
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  Muestra creada con la misma estructura que en el listado, incluyendo:
+  
+  <ResponseField name="id" type="integer">
+    ID asignado a la nueva muestra
+  </ResponseField>
+  
+  <ResponseField name="fecha_modificacion" type="string">
+    Timestamp de creación del registro
+  </ResponseField>
+</ResponseField>
+
+### Reglas de Negocio
+
+1. **Fecha automática**: Si no se proporciona `fecha_analisis`, el sistema usa la fecha actual
+2. **Campos opcionales**: Los campos `lote_id`, `bitacora_id`, `proceso_id` y `maquina_id` son opcionales
+3. **Trazabilidad**: Se recomienda siempre vincular con `lote_id` cuando la muestra corresponda a un lote específico
+4. **Usuario registrado**: El campo `usuario_modificacion` es obligatorio para auditoría
+
+---
+
+## Modelo de Datos
+
+### Tabla `muestras`
+
+```sql
+CREATE TABLE muestras (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  codigo_muestra TEXT NOT NULL UNIQUE,
+  fecha_analisis TEXT NOT NULL,
+  lote_id INTEGER,
+  bitacora_id INTEGER,
+  proceso_id INTEGER,
+  maquina_id INTEGER,
+  resultado TEXT NOT NULL,
+  valor TEXT NOT NULL,
+  parametro TEXT NOT NULL,
+  valor_nominal TEXT NOT NULL,
+  usuario_modificacion TEXT NOT NULL,
+  fecha_modificacion TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (lote_id) REFERENCES lotes(id),
+  FOREIGN KEY (bitacora_id) REFERENCES bitacora_turno(id),
+  FOREIGN KEY (proceso_id) REFERENCES procesos(id),
+  FOREIGN KEY (maquina_id) REFERENCES MAQUINAS(id)
+);
+```
+
+### Índices Recomendados
+
+```sql
+CREATE INDEX idx_muestras_lote_id ON muestras(lote_id);
+CREATE INDEX idx_muestras_fecha_analisis ON muestras(fecha_analisis);
+CREATE INDEX idx_muestras_resultado ON muestras(resultado);
+CREATE UNIQUE INDEX idx_muestras_codigo ON muestras(codigo_muestra);
+```
+
+---
+
+## Integración con Lotes
+
+### Consulta de Muestras en Trazabilidad de Lotes
+
+Cuando se consulta la trazabilidad completa de un lote mediante `/api/lotes/:id/trazabilidad`, se puede complementar con las muestras asociadas:
+
+<RequestExample>
+
+```bash Trazabilidad completa con muestras
+# 1. Obtener trazabilidad del lote
+curl -X GET https://api.prod-sys.com/api/lotes/45/trazabilidad \
+  -H "Authorization: Bearer {token}"
+
+# 2. Obtener muestras del lote
+curl -X GET https://api.prod-sys.com/api/muestras/lote/45 \
+  -H "Authorization: Bearer {token}"
+```
+
+</RequestExample>
+
+Esto permite construir una vista completa:
+- **Producción**: Dónde se produjo el lote (bitácora, fecha, usuario)
+- **Consumo**: Dónde se consumió (telares, fechas, turnos)
+- **Calidad**: Resultados de análisis de muestras asociadas
+- **Historial**: Cambios de estado del lote
+
+### Ejemplo de Análisis de Calidad
+
+```javascript
+// Ejemplo: Identificar lotes con muestras rechazadas
+const loteId = 45;
+
+// 1. Obtener información del lote
+const lote = await fetch(`/api/lotes/${loteId}/trazabilidad`);
+
+// 2. Obtener muestras del lote
+const muestras = await fetch(`/api/muestras/lote/${loteId}`);
+
+// 3. Analizar resultados
+const muestrasRechazadas = muestras.data.filter(
+  m => m.resultado === 'rechazado'
+);
+
+if (muestrasRechazadas.length > 0) {
+  console.log(`Lote ${lote.data.lote.codigo_lote} tiene ${muestrasRechazadas.length} muestras rechazadas`);
+  
+  // Si hay muestras rechazadas, considerar pausar el lote
+  await fetch(`/api/lotes/${loteId}/estado`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      estado: 'pausado',
+      comentario: `Muestras rechazadas: ${muestrasRechazadas.map(m => m.codigo_muestra).join(', ')}`
+    })
+  });
+}
+```
+
+---
+
+## Casos de Uso Comunes
+
+### 1. Registro de Análisis Físico
+
+```bash
+# Muestra de tensión en proceso de bobinado
+curl -X POST https://api.prod-sys.com/api/muestras \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "codigo_muestra": "M-BOB-2025-123",
+    "lote_id": 45,
+    "bitacora_id": 89,
+    "proceso_id": 3,
+    "maquina_id": 12,
+    "resultado": "aprobado",
+    "valor": "850",
+    "parametro": "tensión_grf",
+    "valor_nominal": "800-900",
+    "usuario_modificacion": "operador.calidad"
+  }'
+```
+
+### 2. Registro de Análisis Químico
+
+```bash
+# Análisis de pH en proceso de tratamiento
+curl -X POST https://api.prod-sys.com/api/muestras \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "codigo_muestra": "M-QUIM-2025-045",
+    "bitacora_id": 91,
+    "proceso_id": 7,
+    "resultado": "aprobado",
+    "valor": "15.2",
+    "parametro": "pH",
+    "valor_nominal": "14-16",
+    "usuario_modificacion": "laboratorio.quimico"
+  }'
+```
+
+### 3. Auditoría de Calidad por Lote
+
+```bash
+# Obtener todas las muestras de un lote para auditoría
+curl -X GET https://api.prod-sys.com/api/muestras/lote/45 \
+  -H "Authorization: Bearer {token}" | jq '{
+  total: .data | length,
+  aprobadas: [.data[] | select(.resultado == "aprobado")] | length,
+  rechazadas: [.data[] | select(.resultado == "rechazado")] | length,
+  condicionales: [.data[] | select(.resultado == "condicional")] | length
+}'
+```
+
+### 4. Pausar Lote por Resultado de Calidad
+
+```bash
+# Flujo completo: Crear muestra rechazada + Pausar lote
+
+# 1. Registrar muestra rechazada
+curl -X POST https://api.prod-sys.com/api/muestras \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "codigo_muestra": "M-2025-001-003-005",
+    "lote_id": 45,
+    "bitacora_id": 92,
+    "proceso_id": 3,
+    "maquina_id": 12,
+    "resultado": "rechazado",
+    "valor": "14.2",
+    "parametro": "humedad",
+    "valor_nominal": "8-10",
+    "usuario_modificacion": "operador.calidad"
+  }'
+
+# 2. Pausar lote automáticamente
+curl -X PATCH https://api.prod-sys.com/api/lotes/45/estado \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "estado": "pausado",
+    "comentario": "Muestra M-2025-001-003-005 rechazada por humedad fuera de rango (14.2%, esperado 8-10%)"
+  }'
+```
+
+---
+
+## Relación con Lotes
+
+Las muestras están estrechamente vinculadas con lotes a través del campo `lote_id`. Esta relación permite:
+
+1. **Trazabilidad de calidad**: Vincular resultados de análisis con producción específica
+2. **Control de proceso**: Identificar problemas de calidad en lotes específicos
+3. **Auditoría**: Rastrear historial de análisis por lote
+4. **Acciones correctivas**: Pausar o cerrar lotes basándose en resultados de muestras
+
+Para más información sobre lotes, consulta la [documentación de Lotes](/api/quality/lotes).

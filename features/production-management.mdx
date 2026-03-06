@@ -1,0 +1,427 @@
+---
+title: 'Production Management'
+description: 'Manage production orders, shift operations, and real-time execution tracking'
+icon: 'industry'
+---
+
+PROD-SYS provides comprehensive production management capabilities to track work orders from SAP integration through shop floor execution, quality validation, and completion.
+
+## Key Capabilities
+
+<CardGroup cols={2}>
+  <Card title="Production Orders" icon="file-invoice">
+    Import from SAP, track execution across multiple processes, and manage order lifecycle from creation to closure.
+  </Card>
+  <Card title="Shift Operations" icon="clock">
+    Open daily shift logs (bitácoras), assign personnel, record production data, and close shifts with automatic validation.
+  </Card>
+  <Card title="Multi-Process Execution" icon="diagram-project">
+    Execute orders across 9 industrial processes including extrusion, weaving, lamination, printing, and conversion.
+  </Card>
+  <Card title="Real-Time Tracking" icon="gauge-high">
+    Monitor production progress, machine status, downtime events, and quality checkpoints in real-time.
+  </Card>
+</CardGroup>
+
+---
+
+## Production Order Lifecycle
+
+### Creating Orders
+
+Production orders are imported from SAP using the **Import Orders** workflow:
+
+1. **Upload Excel Export**: Users upload the SAP production orders report (Series de documentos format)
+2. **Preview & Validation**: System parses the file and validates:
+   - 7-digit document numbers
+   - SAP series mapped to internal process IDs (ExtruPP→1, Telar→2, etc.)
+   - Duplicate detection against existing PROD-SYS orders
+3. **Confirm Import**: User reviews new orders, already-existing orders, and unrecognized series before confirming
+
+**Database Schema** (`orden_produccion` table):
+```sql
+CREATE TABLE orden_produccion (
+  id INTEGER PRIMARY KEY,
+  codigo_orden TEXT UNIQUE NOT NULL,  -- 7-digit SAP document number
+  producto TEXT NOT NULL,              -- Product description
+  cantidad_objetivo REAL,              -- Target quantity
+  unidad TEXT,                         -- Unit (KG, M2, MIL, UND)
+  fecha_planificada TEXT,              -- Planned/due date
+  prioridad TEXT,                      -- Alta/Media/Baja
+  estado TEXT DEFAULT 'Creada',       -- Creada, Liberada, En producción, Pausada, Cerrada, Cancelada
+  especificaciones TEXT,               -- JSON: SAP metadata, custom specs
+  motivo_cierre TEXT,
+  fecha_creacion TEXT DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+**Source Reference**: 
+- Parser: `backend/domains/production/ordenProduccion.parser.js`
+- Service: `backend/domains/production/ordenProduccion.service.js:106` (procesarImportacionExcel)
+- Repository: `backend/domains/production/ordenProduccion.repository.js:45` (create)
+
+### Order States
+
+Orders progress through these states:
+
+| State | Description | Allowed Actions |
+|-------|-------------|----------------|
+| **Creada** | Imported from SAP, not yet released to production | Edit specifications, update quantity/dates, release |
+| **Liberada** | Released to production, ready for execution | Start execution, pause, cancel |
+| **En producción** | Active execution in at least one process | Record production, pause, close |
+| **Pausada** | Temporarily halted | Resume, close, cancel |
+| **Cerrada** | Completed (requires motivo_cierre) | View only |
+| **Cancelada** | Cancelled (requires motivo_cierre) | View only |
+
+**State Transition Rules**:
+- Orders in `Liberada`, `En producción`, `Pausada`, `Cerrada`, or `Cancelada` only allow status changes (no technical modifications)
+- Closing or cancelling requires a `motivo_cierre` (closure reason)
+- Auditing: All state changes are logged via `auditService.logStatusChange`
+
+**Source Reference**: `backend/domains/production/ordenProduccion.service.js:69` (update method)
+
+---
+
+## Shift Operations (Bitácoras)
+
+### Opening a Shift
+
+Production supervisors open a **bitácora de turno** at the start of each shift:
+
+**UI Flow**:
+1. Navigate to **Operations → Open Shift**
+2. Select shift (Día/Noche), operational date, and inspector name
+3. System validates: only one active bitácora allowed at a time
+4. System creates bitácora record with state `ABIERTA`
+
+**Database Schema** (`bitacora_turno` table):
+```sql
+CRETE TABLE bitacora_turno (
+  id INTEGER PRIMARY KEY,
+  turno TEXT NOT NULL,                 -- 'Día' or 'Noche'
+  fecha_operativa TEXT NOT NULL,       -- Production date (YYYY-MM-DD)
+  inspector TEXT NOT NULL,             -- Shift supervisor name
+  fuera_de_horario INTEGER DEFAULT 0,  -- Off-hours flag
+  estado TEXT DEFAULT 'ABIERTA',      -- ABIERTA, REVISION, CERRADA
+  fecha_apertura TEXT DEFAULT CURRENT_TIMESTAMP,
+  fecha_cierre TEXT
+);
+```
+
+**Source Reference**: `backend/domains/production/bitacora.service.js:36` (openBitacora)
+
+### Recording Production Data
+
+During the shift, operators record production for each process:
+
+**UI Flow**:
+1. Navigate to active bitácora → Select process (e.g., "Extrusor PP")
+2. If process is non-operational: Mark as "No Operativo" with reason (e.g., "Mantenimiento preventivo")
+3. If operational:
+   - **Quality First**: Record quality samples (muestras) before production
+   - **Production**: Record output quantities per order and machine
+   - **Downtime**: Log any stoppages (paros) with motivo and duration
+
+**Execution Line Model** (`lineas_ejecucion`):
+```sql
+CREATE TABLE lineas_ejecucion (
+  id INTEGER PRIMARY KEY,
+  orden_produccion_id INTEGER NOT NULL,
+  proceso_id INTEGER NOT NULL,
+  maquina_id INTEGER,
+  estado TEXT DEFAULT 'ACTIVA',  -- ACTIVA, PAUSADA, COMPLETADA, CANCELADA
+  fecha_inicio TEXT DEFAULT CURRENT_TIMESTAMP,
+  fecha_fin TEXT,
+  FOREIGN KEY (orden_produccion_id) REFERENCES orden_produccion(id)
+);
+```
+
+Each order-process-machine combination creates a **línea de ejecución** (execution line).
+
+**Work Record Model** (`registros_trabajo`):
+```sql
+CREATE TABLE registros_trabajo (
+  id INTEGER PRIMARY KEY,
+  linea_ejecucion_id INTEGER,
+  bitacora_id INTEGER NOT NULL,
+  maquina_id INTEGER,
+  cantidad_producida REAL DEFAULT 0,
+  merma_kg REAL DEFAULT 0,              -- Waste/scrap in KG
+  observaciones TEXT,
+  parametros TEXT,                      -- JSON: machine params, batch composition, etc.
+  usuario_modificacion TEXT,
+  fecha_hora TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (linea_ejecucion_id) REFERENCES lineas_ejecucion(id),
+  FOREIGN KEY (bitacora_id) REFERENCES bitacora_turno(id)
+);
+```
+
+**Source Reference**: `backend/domains/production/bitacora.service.js:350` (saveProcesoData)
+
+### Process State Dashboard
+
+The bitácora summary shows real-time status for all 9 processes:
+
+**Status Indicators**:
+- ⚪ **Sin datos**: No activity recorded
+- 🟡 **Esperando Calidad**: Production blocked until minimum quality samples recorded
+- 🟡 **Esperando Producción**: Quality validated, awaiting production records
+- 🟡 **Parcial**: Some data recorded, not yet complete
+- 🔴 **Revisión**: Rejected quality samples or incidents detected
+- 🟢 **Completo**: All required data recorded, quality validated
+
+**Validation Rules**:
+- Quality samples must meet minimum count per process (defined in process contracts)
+- Production cannot be recorded until quality is validated
+- Rejected samples trigger `REVISION` state and require observaciones
+
+**Source Reference**: `backend/domains/production/bitacora.service.js:167` (getResumenProcesos)
+
+### Closing a Shift
+
+When the shift ends, the supervisor closes the bitácora:
+
+**Closure Validation**:
+1. **Personnel Check**: All processes with recorded activity must have assigned personnel for the shift
+2. **Downtime Validation**: Total paro time cannot exceed programmed time (default 480 minutes)
+3. **Quality Validation**: Check for rejected samples or incidents
+4. **Observations Required**: If deviations detected, detailed observations are mandatory
+
+**Closure States**:
+- **CERRADA**: Normal closure (all validations passed, no quality issues)
+- **REVISION**: Requires supervisor review (quality rejections or incidents detected)
+
+**Authorization**:
+- Shift owner (inspector who opened the bitácora) can close
+- Administrators and Supervisors can close any bitácora
+
+**Source Reference**: `backend/domains/production/bitacora.service.js:58` (closeBitacora)
+
+---
+
+## Multi-Process Execution
+
+### Process Registry
+
+PROD-SYS supports 9 industrial processes, each with a dedicated **Process Contract** defining:
+- `processId`: Numeric identifier (1-9)
+- `nombre`: Display name
+- `unidadProduccion`: Production unit (KG, M2, MIL, UND)
+- `parametrosRequeridos`: Required operational parameters
+- `frecuenciaMuestreo`: Quality sampling requirements (e.g., muestrasMinTurno: 2)
+- `validaUnidad()`: Unit validation method
+- `validarParametro()`: Parameter validation method
+
+**Registered Processes**:
+
+| ID | Process | Unit | Description |
+|----|---------|------|--------------|
+| 1 | Extrusor PP | KG | Polypropylene extrusion |
+| 2 | Telar | M2 | Weaving |
+| 3 | Laminado | M2 | Lamination |
+| 4 | Imprenta | MIL | Printing (thousands) |
+| 5 | ConverSA | UND | Bag conversion |
+| 6 | ExtruPE | KG | Polyethylene extrusion |
+| 7 | ConverLI | UND | Liner conversion |
+| 8 | Peletiza | KG | Pelletizing |
+| 9 | VestidoM | UND | Bag dressing |
+
+**Source Reference**: `backend/domains/production/contracts/ProcessRegistry.js`
+
+### Machine Management
+
+Each process has multiple machines tracked in the system:
+
+**Machine States**:
+- **Operativa**: Active and available
+- **Mantenimiento**: Under maintenance
+- **Parada**: Stopped/inactive
+- **Baja**: Decommissioned
+
+**Machine Schema** (`MAQUINAS`):
+```sql
+CREATE TABLE MAQUINAS (
+  id INTEGER PRIMARY KEY,
+  codigo TEXT UNIQUE NOT NULL,
+  nombre_visible TEXT NOT NULL,
+  proceso_id INTEGER NOT NULL,
+  estado_actual TEXT DEFAULT 'Operativa',
+  activo INTEGER DEFAULT 1,
+  fecha_baja TEXT,
+  motivo_baja TEXT,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+**State Change Audit** (`maquina_estados_historial`):
+```sql
+CREATE TABLE maquina_estados_historial (
+  id INTEGER PRIMARY KEY,
+  maquina_id INTEGER NOT NULL,
+  estado_anterior TEXT NOT NULL,
+  estado_nuevo TEXT NOT NULL,
+  motivo TEXT,
+  categoria_motivo TEXT,           -- 'Preventivo', 'Correctivo', 'Operacional'
+  usuario TEXT,
+  fecha_hora TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (maquina_id) REFERENCES MAQUINAS(id)
+);
+```
+
+**Source Reference**: `backend/domains/production/maquina.repository.js`
+
+---
+
+## Downtime Tracking
+
+Downtime events (paros) are recorded per process and shift:
+
+**Downtime Schema** (`PARO_PROCESO`):
+```sql
+CREATE TABLE PARO_PROCESO (
+  id INTEGER PRIMARY KEY,
+  bitacora_id INTEGER NOT NULL,
+  proceso_id INTEGER NOT NULL,
+  motivo_id INTEGER NOT NULL,          -- FK to CATALOGO_MOTIVO_PARO
+  minutos_perdidos INTEGER NOT NULL,
+  observacion TEXT,
+  fecha_hora TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (bitacora_id) REFERENCES bitacora_turno(id)
+);
+```
+
+**Downtime Catalog** (`CATALOGO_MOTIVO_PARO`):
+```sql
+CREATE TABLE CATALOGO_MOTIVO_PARO (
+  id INTEGER PRIMARY KEY,
+  nombre TEXT NOT NULL,                -- e.g., "Falla mecánica", "Falta de materia prima"
+  categoria TEXT,                      -- 'Mecánico', 'Eléctrico', 'Logístico', 'Calidad'
+  activo INTEGER DEFAULT 1
+);
+```
+
+**Time Calculation**:
+- Programmed time: 480 minutes (8-hour shift) by default
+- Effective time = Programmed time - Total paro minutes
+- Validation: Total paros cannot exceed programmed time
+
+**Source Reference**: `backend/domains/production/paro.repository.js`
+
+---
+
+## Incident Management
+
+Incidents are recorded for production issues requiring corrective action:
+
+**Incident Schema** (`incidentes`):
+```sql
+CREATE TABLE incidentes (
+  id INTEGER PRIMARY KEY,
+  titulo TEXT NOT NULL,
+  descripcion TEXT NOT NULL,
+  severidad TEXT NOT NULL,             -- 'Baja', 'Media', 'Alta', 'Crítica'
+  linea_ejecucion_id INTEGER,          -- Link to specific order execution
+  estado TEXT DEFAULT 'abierto',       -- 'abierto', 'en_proceso', 'cerrado'
+  accion_correctiva TEXT,
+  fecha_creacion TEXT DEFAULT CURRENT_TIMESTAMP,
+  fecha_cierre TEXT,
+  FOREIGN KEY (linea_ejecucion_id) REFERENCES lineas_ejecucion(id)
+);
+```
+
+**Workflow**:
+1. Operator creates incident with severity level
+2. Supervisor assigns corrective action
+3. Incident tracked until closure
+4. Closed incidents with severity ≥ Media trigger bitácora REVISION state
+
+**Source Reference**: `backend/domains/production/incidente.repository.js`
+
+---
+
+## Weekly Planning
+
+Supervisors create weekly production plans (`plan_semanal`):
+
+**Planning Workflow**:
+1. **Create Plan**: Define ISO week (year + week number)
+2. **Assign Orders**: Schedule orders to specific days, shifts, processes, and machines
+3. **Assign Personnel**: Assign workers to processes and shifts
+4. **Activate Plan**: Change state from `BORRADOR` to `ACTIVO`
+5. **Create Baseline Snapshot**: Lock the current plan as a baseline for deviation tracking
+
+**Plan Schema** (`plan_semanal`):
+```sql
+CREATE TABLE plan_semanal (
+  id INTEGER PRIMARY KEY,
+  anio INTEGER NOT NULL,
+  semana_iso INTEGER NOT NULL,         -- ISO 8601 week number (1-53)
+  fecha_inicio TEXT NOT NULL,
+  fecha_fin TEXT NOT NULL,
+  estado TEXT DEFAULT 'BORRADOR',      -- BORRADOR, ACTIVO, CERRADO
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(anio, semana_iso)
+);
+```
+
+**Order Assignments** (`plan_detalle_ordenes`):
+```sql
+CREATE TABLE plan_detalle_ordenes (
+  id INTEGER PRIMARY KEY,
+  plan_id INTEGER NOT NULL,
+  orden_id INTEGER NOT NULL,
+  proceso_id INTEGER NOT NULL,
+  maquina_id INTEGER,
+  turno TEXT NOT NULL,                 -- 'Día', 'Noche'
+  dia_semana INTEGER NOT NULL,         -- 0=Sunday, 6=Saturday
+  secuencia INTEGER,                   -- Execution order within shift
+  FOREIGN KEY (plan_id) REFERENCES plan_semanal(id),
+  FOREIGN KEY (orden_id) REFERENCES orden_produccion(id)
+);
+```
+
+**Deviation Tracking** (`desviaciones_plan`):
+```sql
+CREATE TABLE desviaciones_plan (
+  id INTEGER PRIMARY KEY,
+  plan_id INTEGER NOT NULL,
+  bitacora_id INTEGER NOT NULL,
+  proceso_id INTEGER,
+  maquina_id INTEGER,
+  tipo_desviacion TEXT NOT NULL,       -- 'ORDEN', 'PERSONAL', 'CANTIDAD'
+  valor_planificado TEXT,
+  valor_ejecutado TEXT,
+  motivo_id INTEGER,                   -- FK to catalogo_motivo_desviacion
+  comentario TEXT,
+  usuario TEXT,
+  fecha_hora TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (plan_id) REFERENCES plan_semanal(id),
+  FOREIGN KEY (bitacora_id) REFERENCES bitacora_turno(id)
+);
+```
+
+When actual execution deviates from the plan, the system records:
+- **Order deviations**: Planned order not executed, or unplanned order executed
+- **Personnel deviations**: Different workers assigned than planned
+- **Quantity deviations**: Actual production differs from planned
+
+**Source Reference**: `backend/domains/production/planning.repository.js`
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quality Control" icon="microscope" href="/features/quality-control">
+    Learn how quality samples, batch management, and traceability work
+  </Card>
+  <Card title="Resource Tracking" icon="box" href="/features/resource-tracking">
+    Track material consumption and inventory integration
+  </Card>
+  <Card title="Personnel Management" icon="users" href="/features/personnel-management">
+    Manage workers, assignments, and shift groups
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/auth/login">
+    Explore the REST API endpoints for production management
+  </Card>
+</CardGroup>

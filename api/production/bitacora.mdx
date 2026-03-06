@@ -1,0 +1,500 @@
+---
+title: "Bitácora API"
+description: "Shift log management endpoints for production tracking"
+---
+
+# Bitácora (Shift Log) API
+
+The Bitácora API manages shift-based production logging. Each shift (turno) has a dedicated bitácora that tracks production, quality, incidents, and operational data across all production processes.
+
+## Authentication
+
+All endpoints require authentication via JWT token (header or cookie). Some endpoints require specific permissions:
+- `MANAGE_QUALITY` - Required for opening/closing shift logs
+- `MANAGE_PRODUCTION` - Required for saving process data
+
+## Core Concepts
+
+**Shift Structure:**
+- **T1 (Turno 1)**: 07:00 - 15:00
+- **T2 (Turno 2)**: 15:00 - 23:00
+- **T3 (Turno 3)**: 23:00 - 07:00 (next day)
+
+**Bitácora States:**
+- `ABIERTA` - Active shift, data entry allowed
+- `REVISION` - Closed with deviations requiring review
+- `CERRADA` - Finalized, immutable
+
+## Get Current State
+
+```http
+GET /api/bitacora/estado
+```
+
+Returns the current shift state with process summary and available actions.
+
+### Response Fields
+
+<ResponseField name="abierta" type="boolean">
+  Whether there is an active shift log.
+</ResponseField>
+
+<ResponseField name="bitacora" type="object">
+  Current bitácora details.
+  <Expandable title="bitacora properties">
+    <ResponseField name="id" type="integer">
+      Bitácora ID
+    </ResponseField>
+    <ResponseField name="turno" type="string">
+      Shift: T1, T2, or T3
+    </ResponseField>
+    <ResponseField name="fecha_operativa" type="string">
+      Operational date (YYYY-MM-DD)
+    </ResponseField>
+    <ResponseField name="inspector" type="string">
+      Shift supervisor name
+    </ResponseField>
+    <ResponseField name="estado" type="string">
+      ABIERTA, REVISION, or CERRADA
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="procesos" type="array">
+  Summary of all production processes.
+  <Expandable title="proceso properties">
+    <ResponseField name="id" type="integer">
+      Process ID (1-9)
+    </ResponseField>
+    <ResponseField name="nombre" type="string">
+      Process name (e.g., "Extrusor PP", "Telares")
+    </ResponseField>
+    <ResponseField name="estadoProceso" type="string">
+      Current state: SIN_DATOS, ESPERANDO_CALIDAD, COMPLETO, REVISION, etc.
+    </ResponseField>
+    <ResponseField name="produccionTotal" type="number">
+      Total production quantity for this shift
+    </ResponseField>
+    <ResponseField name="unidad" type="string">
+      Production unit (kg, m, unidades, impresiones, etc.)
+    </ResponseField>
+    <ResponseField name="calidadValidada" type="boolean">
+      Whether quality samples have been validated
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="estadoTurno" type="string">
+  Overall shift state: SIN_TURNO, EN_PROCESO, LISTO_PARA_CIERRE, CERRADO
+</ResponseField>
+
+<ResponseField name="siguienteAccion" type="string">
+  Recommended next action: ABRIR_TURNO, IR_A_PROCESO, CERRAR_TURNO, etc.
+</ResponseField>
+
+<ResponseField name="puedeCerrarTurno" type="boolean">
+  Whether all processes are complete and shift can be closed.
+</ResponseField>
+
+### Example Request
+
+```bash cURL
+curl -X GET https://api.example.com/api/bitacora/estado \
+  -H "Authorization: Bearer <token>"
+```
+
+```javascript JavaScript
+const response = await fetch('/api/bitacora/estado', {
+  headers: {
+    'Authorization': `Bearer ${token}`
+  }
+});
+const estado = await response.json();
+```
+
+### Example Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "abierta": true,
+    "bitacora": {
+      "id": 42,
+      "turno": "T1",
+      "fecha_operativa": "2026-03-06",
+      "inspector": "Juan Pérez",
+      "estado": "ABIERTA"
+    },
+    "procesos": [
+      {
+        "id": 1,
+        "nombre": "Extrusor PP",
+        "estadoProceso": "COMPLETO",
+        "produccionTotal": 1250,
+        "unidad": "kg",
+        "calidadValidada": true
+      },
+      {
+        "id": 2,
+        "nombre": "Telares",
+        "estadoProceso": "ESPERANDO_CALIDAD",
+        "produccionTotal": 0,
+        "unidad": "m",
+        "calidadValidada": false
+      }
+    ],
+    "estadoTurno": "EN_PROCESO",
+    "siguienteAccion": "IR_A_PROCESO",
+    "puedeCerrarTurno": false,
+    "razonesBloqueoCierre": ["Existen procesos pendientes: Telares"]
+  }
+}
+```
+
+## Get Active Shift Log
+
+```http
+GET /api/bitacora/activa
+```
+
+Returns the currently active shift log, or null if no shift is open.
+
+### Response
+
+Returns the active bitácora object or `null`.
+
+## Open Shift Log
+
+```http
+POST /api/bitacora/abrir
+```
+
+**Permission:** `MANAGE_QUALITY`
+
+Opens a new shift log for the current shift. Automatically determines the shift (T1/T2/T3) based on current time.
+
+### Business Rules
+
+- Only one shift log can be active at a time
+- Shift and operational date are auto-calculated
+- Out-of-hours flag is set if opened outside normal shift time
+- Inspector is set from authenticated user
+
+### Implementation
+
+From `bitacora.controller.js:127`:
+
+```javascript
+const { turno, fechaOperativa } = getTurnoActual();
+const inspector = req.user.nombre || req.user.username;
+
+// Detect out-of-hours opening
+const now = new Date();
+const hours = now.getHours();
+let fueraDeHorario = false;
+if (turno === 'T1' && (hours < 7 || hours >= 15)) fueraDeHorario = true;
+if (turno === 'T2' && (hours < 15 || hours >= 23)) fueraDeHorario = true;
+if (turno === 'T3' && (hours >= 7 && hours < 23)) fueraDeHorario = true;
+```
+
+### Example Request
+
+```bash cURL
+curl -X POST https://api.example.com/api/bitacora/abrir \
+  -H "Authorization: Bearer <token>"
+```
+
+### Example Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": 43,
+    "turno": "T2",
+    "fecha_operativa": "2026-03-06",
+    "inspector": "María López",
+    "estado": "ABIERTA",
+    "fuera_de_horario": false,
+    "fecha_apertura": "2026-03-06T15:05:00Z"
+  }
+}
+```
+
+### Error Responses
+
+<ResponseField name="400 Bad Request">
+  Returned when a shift log is already open:
+  ```json
+  {
+    "success": false,
+    "error": "Ya existe una bitácora abierta para este turno."
+  }
+  ```
+</ResponseField>
+
+## Close Shift Log
+
+```http
+POST /api/bitacora/:id/cerrar
+```
+
+**Permission:** `MANAGE_QUALITY`
+
+Closes a shift log after validating all processes are complete.
+
+### Path Parameters
+
+<ParamField path="id" type="integer" required>
+  Bitácora ID to close
+</ParamField>
+
+### Closure Validation
+
+From `bitacora.service.js:106`:
+
+1. **Process Validation**: Every process must have quality samples and production data
+2. **Personnel Check**: Processes with activity must have assigned personnel
+3. **Downtime Validation**: Total downtime cannot exceed programmed time
+4. **Rejection Detection**: If quality rejections exist, state moves to REVISION
+5. **Observation Requirement**: Deviations require detailed observations
+
+### Response
+
+<ResponseField name="message" type="string">
+  Success or revision message
+</ResponseField>
+
+<ResponseField name="estado" type="string">
+  Final state: CERRADA or REVISION
+</ResponseField>
+
+### Example Request
+
+```bash cURL
+curl -X POST https://api.example.com/api/bitacora/43/cerrar \
+  -H "Authorization: Bearer <token>"
+```
+
+### Example Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Bitácora enviada a REVISIÓN debido a desviaciones detectadas.",
+    "estado": "REVISION"
+  }
+}
+```
+
+## Get Process Data
+
+```http
+GET /api/bitacora/proceso-data?bitacora_id={id}&proceso_id={pid}
+```
+
+Retrieves all data entered for a specific process in a shift.
+
+### Query Parameters
+
+<ParamField query="bitacora_id" type="integer" required>
+  Bitácora ID
+</ParamField>
+
+<ParamField query="proceso_id" type="integer" required>
+  Process ID (1-9)
+</ParamField>
+
+<ParamField query="ultimo_turno" type="boolean">
+  If true, retrieve data from the last closed shift for this process (for parameter inheritance)
+</ParamField>
+
+### Response
+
+<ResponseField name="no_operativo" type="boolean">
+  Whether the process was marked as non-operational this shift
+</ResponseField>
+
+<ResponseField name="planificado" type="object">
+  Planned orders and personnel from weekly planning (if available)
+</ResponseField>
+
+<ResponseField name="muestras" type="array">
+  Quality samples recorded
+</ResponseField>
+
+<ResponseField name="produccion" type="array">
+  Production records by order and machine
+</ResponseField>
+
+<ResponseField name="desperdicio" type="array">
+  Waste/scrap records
+</ResponseField>
+
+<ResponseField name="parametros_operativos" type="object">
+  Process-specific operational parameters (e.g., temperatures, speeds)
+</ResponseField>
+
+<ResponseField name="solo_lectura" type="boolean">
+  Whether the shift is closed and data is read-only
+</ResponseField>
+
+## Save Process Data
+
+```http
+POST /api/bitacora/guardar-proceso
+```
+
+**Permission:** `MANAGE_PRODUCTION`
+
+Saves production and quality data for a process.
+
+### Request Body
+
+<ParamField body="bitacora_id" type="integer" required>
+  Target bitácora ID
+</ParamField>
+
+<ParamField body="proceso_id" type="integer" required>
+  Process ID (1-9)
+</ParamField>
+
+<ParamField body="no_operativo" type="boolean">
+  Mark process as non-operational (e.g., maintenance, no orders)
+</ParamField>
+
+<ParamField body="motivo_no_operativo" type="string">
+  Reason for non-operation (required if no_operativo = true)
+</ParamField>
+
+<ParamField body="produccion" type="array">
+  Production records:
+  ```json
+  [
+    {
+      "orden_id": 12345,
+      "maquina": "TEL-01",
+      "cantidad": 500,
+      "unidad": "m"
+    }
+  ]
+  ```
+</ParamField>
+
+<ParamField body="muestras" type="array">
+  Quality samples:
+  ```json
+  [
+    {
+      "parametro": "Ancho",
+      "valor": "105",
+      "resultado": "Cumple"
+    }
+  ]
+  ```
+</ParamField>
+
+<ParamField body="observaciones" type="string">
+  General observations or notes
+</ParamField>
+
+### Example Request
+
+```bash cURL
+curl -X POST https://api.example.com/api/bitacora/guardar-proceso \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "bitacora_id": 43,
+    "proceso_id": 2,
+    "produccion": [
+      {
+        "orden_id": 12345,
+        "maquina": "TEL-03",
+        "cantidad": 850,
+        "unidad": "m"
+      }
+    ],
+    "muestras": [
+      {
+        "parametro": "Ancho",
+        "valor": "105",
+        "resultado": "Cumple"
+      },
+      {
+        "parametro": "Construcción",
+        "valor": "10x10",
+        "resultado": "Cumple"
+      }
+    ],
+    "observaciones": "Producción normal sin incidentes."
+  }'
+```
+
+## Get Time Summary
+
+```http
+GET /api/bitacora/resumen-tiempo?bitacora_id={id}&proceso_id={pid}
+```
+
+Calculates programmed time, downtime, and effective time for a process.
+
+### Query Parameters
+
+<ParamField query="bitacora_id" type="integer" required>
+  Bitácora ID
+</ParamField>
+
+<ParamField query="proceso_id" type="integer" required>
+  Process ID
+</ParamField>
+
+### Response
+
+<ResponseField name="tiempo_programado" type="integer">
+  Programmed time in minutes (typically 480 for an 8-hour shift)
+</ResponseField>
+
+<ResponseField name="total_paros" type="integer">
+  Total downtime in minutes
+</ResponseField>
+
+<ResponseField name="tiempo_efectivo" type="integer">
+  Effective production time = programmed - downtime
+</ResponseField>
+
+### Example Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "tiempo_programado": 480,
+    "total_paros": 45,
+    "tiempo_efectivo": 435
+  }
+}
+```
+
+## Best Practices
+
+<Tip>
+**Quality-First Workflow**: Always validate quality samples before recording production. The system enforces this requirement.
+</Tip>
+
+<Warning>
+**Closure Validation**: Ensure all processes have complete data before attempting to close a shift. Missing data will block closure.
+</Warning>
+
+<Check>
+**Audit Trail**: All actions are automatically logged with user, timestamp, and changes. This supports regulatory compliance.
+</Check>
+
+## Related Endpoints
+
+- [Production Orders](/api/production/ordenes) - Manage production orders
+- [Incidents](/api/production/incidentes) - Report shift incidents
+- [Quality Control](/api/quality/muestras) - Quality sample management
+- [Planning](/api/production/planning) - Weekly production planning

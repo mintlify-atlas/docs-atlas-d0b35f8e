@@ -1,0 +1,491 @@
+---
+title: Conversión de Liner PE (PE Liner Conversion)
+description: Cutting and heat-sealing process that transforms tubular PE film into individual bag liners
+---
+
+## Overview
+
+Conversión de Liner PE (Process ID: 7) converts tubular polyethylene film rolls into individual bag liners (bolsas internas) through automated cutting and bottom heat-sealing. These liners provide moisture barriers for industrial bags, particularly for food, chemicals, and hygroscopic materials.
+
+### Process Characteristics
+
+- **Process Type**: Order-based production
+- **Production Unit**: unidades (units/liners)
+- **Product**: PE liners with sealed bottom, cut to nominal length
+- **Machines**: 1 specialized line (CONVLI)
+- **Order Pattern**: `7\d{6}` (e.g., 7000234)
+- **Production Target**: 12,000 liners per shift
+- **Speed**: 25 units/min nominal
+
+### What This Process Does
+
+The Liner PE process:
+- **Receives**: Tubular PE film rolls from Extrusión PE (Process 6)
+- **Transforms**: Continuous tubular film → Individual sealed liners
+- **Delivers**: Counted and packaged liners for insertion into bags
+- **Method**: Automated cutting and thermal bottom sealing
+
+## Production Flow
+
+### Upstream Dependencies
+
+Liner PE consumes PE film from:
+- **Extrusión PE (Process 6)**: Tubular polyethylene film rolls
+  - Tracked via lot ID (lote_pe_id)
+
+### Downstream Consumers
+
+Produced liners feed into:
+- **Conversión Sacos Vestidos (Process 9)**: Integrated lined bag conversion
+- **Manual liner insertion**: Offline operations (not tracked in system)
+
+### Production Tracking Method
+
+**Unit Counter Method** (`ConversionLinerPEContract.js:116-119`):
+
+```javascript
+reglasProduccion: {
+  modalidad: 'contador_unidades',
+  unidad: 'unidades'
+}
+```
+
+## Data Structures
+
+### Key Tables
+
+#### registros_trabajo
+```javascript
+{
+  linea_ejecucion_id: FK,
+  bitacora_id: FK,
+  maquina_id: 8, // CONVLI
+  cantidad_producida: liners_producidos,
+  merma_kg: waste (returned to Extrusor PE),
+  parametros: JSON {
+    liners_producidos: integer,
+    temperatura_sellado: decimal,
+    velocidad_operacion: decimal,
+    merma_kg: decimal,
+    destino_merma: 'Retorno ExtrusorPE',
+    observaciones: text
+  }
+}
+```
+
+#### linerpe_consumo_rollo_pe
+PE roll consumption:
+```javascript
+{
+  bitacora_id: FK,
+  maquina_id: 8,
+  orden_id: FK,
+  codigo_lote_pe: text,
+  lote_pe_id: FK,
+  registro_trabajo_id: FK
+}
+```
+
+#### linerpe_calidad_muestras
+Quality samples (4 inspections per shift):
+```javascript
+{
+  bitacora_id: FK,
+  maquina_id: 8,
+  orden_id: FK,
+  inspeccion_indice: 1-4,
+  parametro: 'ancho_liner' | 'largo_liner' | 'sello_fondo',
+  valor: decimal,
+  valor_nominal: decimal,
+  resultado: 'Cumple' | 'No cumple'
+}
+```
+
+### Lot Generation
+
+**Per-Shift Lot Creation** (`linerPE.service.js:147-159`):
+
+One lot generated per shift per order:
+```javascript
+codigo_lote = `${codigo_orden}-${correlativo}`
+// Example: 7000234-001
+```
+
+Correlative increments per order across all production history.
+
+## Quality Parameters
+
+### Critical Parameters
+
+#### 1. Liner Width (ancho_liner)
+- **Unit**: inches
+- **Tolerance**: ±0.25 inches
+- **Nominal**: From order specification (ancho_nominal)
+- **Critical**: No (informational)
+- **Sampling**: 4 inspections per shift
+- **Input Format**: Fractions of 1/8
+
+#### 2. Liner Length (largo_liner)
+- **Unit**: inches
+- **Tolerance**: ±0.25 inches
+- **Nominal**: From order specification (largo_nominal)
+- **Critical**: No
+- **Sampling**: 4 inspections per shift
+- **Input Format**: Fractions of 1/8
+
+#### 3. Bottom Seal (sello_fondo) — CRITICAL
+- **Type**: Pass/Fail (Cumple/No cumple)
+- **Nominal**: Cumple
+- **Critical**: **YES**
+- **Sampling**: 4 inspections per shift
+- **Method**: Visual inspection and manual leak test
+- **Impact**: Failed seal = contamination risk and product loss
+
+### Operational Parameters (Informational)
+
+**Recorded once per shift** (`ConversionLinerPEContract.js:89-101`):
+
+```javascript
+parametrosInformativos: [
+  {
+    nombre: 'temperatura_sellado',
+    etiqueta: 'Temperatura de Sellado',
+    unidad: '°C',
+    grupo: 'maquina'
+  },
+  {
+    nombre: 'velocidad_operacion',
+    etiqueta: 'Velocidad de Operación',
+    unidad: 'unidades/min',
+    grupo: 'maquina'
+  }
+]
+```
+
+### Sampling Frequency (`ConversionLinerPEContract.js:103-107`)
+
+```javascript
+frecuenciaMuestreo: {
+  registrosFormalsPorTurno: 4,
+  omisionRequiereMotivo: true,
+  permiteCopiarMuestraAnterior: false
+}
+```
+
+Each inspection must measure all 3 parameters.
+
+## Business Logic
+
+### PE Lot Validation (`linerPE.service.js:62-68`)
+
+```javascript
+for (const rollo of rollos_pe) {
+  const lote = await this.loteService.getById(rollo.lote_pe_id);
+  if (!lote) throw new ValidationError('El lote PE indicado no existe.');
+  if (lote.estado === 'cerrado') {
+    throw new ValidationError(`El lote ${lote.codigo_lote} está cerrado.`);
+  }
+}
+```
+
+Only active or paused PE lots can be consumed.
+
+### Production Validation (`linerPE.service.js:71-81`)
+
+```javascript
+if (liners_producidos > 0) {
+  if (rollos_pe.length === 0) {
+    throw new ValidationError('Debe declarar al menos un rollo PE cuando hay producción.');
+  }
+  if (temperatura_sellado === undefined || temperatura_sellado === null || temperatura_sellado <= 0) {
+    throw new ValidationError('La temperatura de sellado es obligatoria y debe ser mayor a 0 cuando hay producción.');
+  }
+  if (velocidad_operacion === undefined || velocidad_operacion === null || velocidad_operacion <= 0) {
+    throw new ValidationError('La velocidad de operación es obligatoria y debe ser mayor a 0 cuando hay producción.');
+  }
+}
+```
+
+Operational parameters (temperature, speed) are **mandatory** when production > 0.
+
+### Quality Auto-Calculation (`linerPE.service.js:162-176`)
+
+```javascript
+for (const m of muestras) {
+  let resultado = m.resultado;
+  let valorNominal = null;
+
+  if (['ancho_liner', 'largo_liner'].includes(m.parametro)) {
+    valorNominal = especificaciones[m.parametro === 'ancho_liner' ? 'ancho_nominal' : 'largo_nominal'];
+    if (valorNominal !== undefined && valorNominal !== null) {
+      if (Math.abs(m.valor - valorNominal) > 0.25) {
+        resultado = 'No cumple';
+      } else {
+        resultado = 'Cumple';
+      }
+    }
+  }
+  // sello_fondo already validated as 'Cumple' or 'No cumple'
+}
+```
+
+Dimensional checks auto-calculated with ±0.25" tolerance. Seal result passed through as-is from operator inspection.
+
+### Waste Destination
+
+**All waste returns to Extrusor PE** (`linerPE.service.js:117`):
+
+```javascript
+parametrosJSON = {
+  liners_producidos,
+  temperatura_sellado,
+  velocidad_operacion,
+  merma_kg,
+  destino_merma: 'Retorno ExtrusorPE',
+  observaciones
+}
+```
+
+PE waste is **not discarded**—it's returned for reprocessing.
+
+## API Endpoints
+
+### GET `/api/linerpe/detalle`
+
+Returns Liner PE line status:
+
+**Response**:
+```javascript
+{
+  maquina: { id: 8, codigo: 'CONVLI', nombre_visible: 'Convertidora Liner PE' },
+  estado_proceso: 'Completo',
+  ultimo_registro: {
+    id: 128,
+    orden_id: 234,
+    codigo_orden: '7000234',
+    cantidad_producida: 12400,
+    merma_kg: 8.5,
+    parametros: '{ "liners_producidos": 12400, "temperatura_sellado": 165, "velocidad_operacion": 25, ... }'
+  },
+  rollos_pe_consumidos: [
+    {
+      codigo_lote_pe: '6000123-002',
+      lote_pe_id: 34
+    }
+  ],
+  muestras_calidad: [
+    {
+      inspeccion_indice: 1,
+      parametro: 'ancho_liner',
+      valor: 20.0,
+      valor_nominal: 20.0,
+      resultado: 'Cumple'
+    },
+    {
+      inspeccion_indice: 1,
+      parametro: 'largo_liner',
+      valor: 34.0,
+      valor_nominal: 34.0,
+      resultado: 'Cumple'
+    },
+    {
+      inspeccion_indice: 1,
+      parametro: 'sello_fondo',
+      resultado: 'Cumple'
+    }
+    // Repeat for inspections 2, 3, 4...
+  ],
+  lote_turno: {
+    id: 56,
+    codigo_lote: '7000234-001',
+    estado: 'activo',
+    fecha_produccion: '2026-03-06'
+  }
+}
+```
+
+**Implementation**: `linerPE.service.js:13-33`
+
+### POST `/api/linerpe/guardar`
+
+Saves shift liner production data:
+
+**Request Body**:
+```javascript
+{
+  bitacora_id: 42,
+  orden_id: 234,
+  liners_producidos: 12400,
+  rollos_pe: [
+    {
+      lote_pe_id: 34
+    }
+  ],
+  muestras: [
+    {
+      inspeccion_indice: 1,
+      parametro: 'ancho_liner',
+      valor: 20.0
+    },
+    {
+      inspeccion_indice: 1,
+      parametro: 'largo_liner',
+      valor: 34.0
+    },
+    {
+      inspeccion_indice: 1,
+      parametro: 'sello_fondo',
+      resultado: 'Cumple'
+    }
+    // Repeat for inspections 2, 3, 4...
+  ],
+  temperatura_sellado: 165,
+  velocidad_operacion: 25,
+  merma_kg: 8.5,
+  observaciones: ''
+}
+```
+
+**Response**:
+```javascript
+{
+  registro_id: 128,
+  estado: 'Completo'
+}
+```
+
+**Transaction Flow** (`linerPE.service.js:94-233`):
+1. Validate order belongs to Process 7
+2. Validate PE lots are active (not closed)
+3. Validate operational parameters if production > 0
+4. Delete previous shift data (idempotent)
+5. Get/create `linea_ejecucion`
+6. Save `registros_trabajo` with operational params
+7. For each PE roll:
+   - Validate lot exists
+   - Save PE roll consumption
+8. Generate or retrieve shift lot: `{codigo_orden}-{correlativo}`
+9. Save quality samples (auto-calculate dimensional pass/fail)
+10. Calculate process state
+11. Update `bitacora_maquina_status`
+
+**Implementation**: `linerPE.service.js:35-234`  
+**Permission Required**: `MANAGE_PRODUCTION`
+
+## Machine Status States
+
+**Calculated in**: `linerPE.service.js:192-228`
+
+- **Sin datos**: No production, samples, or waste
+- **Parcial**: Some data recorded
+- **Completo**:
+  - Production > 0
+  - At least 1 PE roll declared
+  - Temperature and speed recorded
+  - 4 inspections (indices 1, 2, 3, 4)
+  - Each inspection has all 3 parameters
+- **Con desviación**: Complete but quality parameters failed
+
+**Completeness Check** (`linerPE.service.js:204-218`):
+```javascript
+if (tieneProduccion && rollos_pe.length > 0 && temperatura_sellado > 0 && velocidad_operacion > 0) {
+  const indices = [...new Set(muestrasGuardadas.map(m => m.inspeccion_indice))];
+  const tiene4Inspecciones = [1, 2, 3, 4].every(i => indices.includes(i));
+
+  let paramsOk = true;
+  if (tiene4Inspecciones) {
+    for (let i = 1; i <= 4; i++) {
+      const paramsInspec = muestrasGuardadas.filter(m => m.inspeccion_indice === i).map(m => m.parametro);
+      if (!['ancho_liner', 'largo_liner', 'sello_fondo'].every(p => paramsInspec.includes(p))) {
+        paramsOk = false;
+        break;
+      }
+    }
+  }
+
+  if (paramsOk) {
+    estado = 'Completo';
+  }
+}
+```
+
+## Traceability
+
+### Material and Lot Flow
+
+```
+Extrusión PE produces lot: 6000123-002
+          ↓
+Liner PE consumes 6000123-002
+          ↓
+Liner PE generates shift lot: 7000234-001
+          ↓
+Conversión Sacos Vestidos consumes 7000234-001
+```
+
+### Waste Return Loop
+
+```
+Liner PE waste (8.5 kg)
+          ↓
+Returned to Extrusor PE
+          ↓
+Reprocessed into new PE film
+```
+
+This closed-loop waste management reduces material costs and environmental impact.
+
+## Operational Rules
+
+### Personnel Requirements (`ConversionLinerPEContract.js:46-50`)
+
+```javascript
+personalOperativo: {
+  minimo: 1,
+  maximo: 1,
+  reglasEspeciales: 'Un solo operador para alimentación y retiro de paquetes.'
+}
+```
+
+Single-operator machine.
+
+### Stop Restrictions (`ConversionLinerPEContract.js:16-21`)
+
+```javascript
+restriccionesInicio: [
+  'Sin rollos de manga PE disponibles',
+  'Falla en sistema de sellado',
+  'Temperatura de sellado fuera de rango',
+  'Orden sin dimensiones definidas (ancho o largo)'
+]
+```
+
+### Downtime Categories (`ConversionLinerPEContract.js:40-45`)
+
+- **Operational**: PE roll change, length adjustment, sealer bar cleaning, Teflon replacement
+- **Mechanical**: Sealing resistance failure, photocell failure, cutting pneumatics failure
+- **Quality**: Weak/leaking seal, length out of range, burnt seal
+- **External**: PE film shortage, electrical failure
+
+## Impact of Variability (`ConversionLinerPEContract.js:51-54`)
+
+```javascript
+impactoVariabilidad: [
+  {
+    condicion: 'Variación de espesor en película',
+    impacto: 'Causa sellados irregulares o quemados, requiriendo ajuste constante de temperatura.'
+  },
+  {
+    condicion: 'Electricidad estática alta',
+    impacto: 'Dificulta la apertura y el conteo de los liners, reduciendo la velocidad de empaque.'
+  }
+]
+```
+
+High static electricity is particularly problematic for liner handling and packaging.
+
+## Related Processes
+
+- **Upstream**: [Extrusión PE](/processes/extrusion-pe) (Process 6)
+- **Downstream**: [Conversión Sacos Vestidos](/processes/vestidos) (Process 9)
+- **Related**: [Production Orders](/quality/orders), [Lot Management](/quality/lots)

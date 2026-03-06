@@ -1,0 +1,611 @@
+---
+title: "Planning API"
+description: "Weekly production planning and deviation tracking"
+---
+
+# Planning API
+
+The Planning API manages weekly production planning, including order scheduling, personnel assignments, and deviation tracking against planned vs. actual execution.
+
+## Authentication
+
+- **Read operations**: `VIEW_PRODUCTION` permission
+- **Planning operations**: `ASSIGN_OPERATIONS` permission
+- **Deviation tracking**: `MANAGE_PRODUCTION` permission
+
+## Get Weekly Plan
+
+```http
+GET /api/planning/week/:anio/:semana
+```
+
+**Permission:** `VIEW_PRODUCTION`
+
+Retrieves the production plan for a specific week.
+
+### Path Parameters
+
+<ParamField path="anio" type="integer" required>
+  Year (e.g., 2026)
+</ParamField>
+
+<ParamField path="semana" type="integer" required>
+  ISO week number (1-53)
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="integer">
+  Plan ID
+</ResponseField>
+
+<ResponseField name="anio" type="integer">
+  Year
+</ResponseField>
+
+<ResponseField name="semana" type="integer">
+  Week number
+</ResponseField>
+
+<ResponseField name="estado" type="string">
+  Plan state: Borrador, Publicado
+</ResponseField>
+
+<ResponseField name="ordenes" type="array">
+  Planned production orders for the week
+  <Expandable title="orden properties">
+    <ResponseField name="id" type="integer">
+      Assignment ID
+    </ResponseField>
+    <ResponseField name="orden_id" type="integer">
+      Production order ID
+    </ResponseField>
+    <ResponseField name="proceso_id" type="integer">
+      Target process ID
+    </ResponseField>
+    <ResponseField name="turno" type="string">
+      Planned shift: T1, T2, T3
+    </ResponseField>
+    <ResponseField name="dia_semana" type="integer">
+      Day of week (1=Monday, 7=Sunday)
+    </ResponseField>
+    <ResponseField name="cantidad_planificada" type="number">
+      Planned production quantity
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="personal" type="array">
+  Personnel assignments for the week
+  <Expandable title="assignment properties">
+    <ResponseField name="id" type="integer">
+      Assignment ID
+    </ResponseField>
+    <ResponseField name="persona_id" type="integer">
+      Person ID
+    </ResponseField>
+    <ResponseField name="proceso_id" type="integer">
+      Assigned process ID
+    </ResponseField>
+    <ResponseField name="turno" type="string">
+      Assigned shift
+    </ResponseField>
+    <ResponseField name="dia_semana" type="integer">
+      Day of week
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example Request
+
+```bash cURL
+curl -X GET https://api.example.com/api/planning/week/2026/10 \
+  -H "Authorization: Bearer <token>"
+```
+
+```javascript JavaScript
+const response = await fetch('/api/planning/week/2026/10', {
+  headers: { 'Authorization': `Bearer ${token}` }
+});
+const plan = await response.json();
+```
+
+### Example Response
+
+```json
+{
+  "id": 5,
+  "anio": 2026,
+  "semana": 10,
+  "estado": "Publicado",
+  "ordenes": [
+    {
+      "id": 101,
+      "orden_id": 12345,
+      "proceso_id": 1,
+      "turno": "T1",
+      "dia_semana": 1,
+      "cantidad_planificada": 1500
+    },
+    {
+      "id": 102,
+      "orden_id": 12346,
+      "proceso_id": 2,
+      "turno": "T1",
+      "dia_semana": 2,
+      "cantidad_planificada": 3000
+    }
+  ],
+  "personal": [
+    {
+      "id": 201,
+      "persona_id": 42,
+      "proceso_id": 1,
+      "turno": "T1",
+      "dia_semana": 1
+    }
+  ]
+}
+```
+
+<ResponseField name="404 Response">
+  If no plan exists for the specified week:
+  ```json
+  {
+    "message": "No existe planificación para esta semana",
+    "plan": null
+  }
+  ```
+</ResponseField>
+
+## Create Plan
+
+```http
+POST /api/planning/create
+```
+
+**Permission:** `ASSIGN_OPERATIONS`
+
+Creates a new weekly production plan.
+
+### Request Body
+
+<ParamField body="anio" type="integer" required>
+  Year
+</ParamField>
+
+<ParamField body="semana" type="integer" required>
+  ISO week number (1-53)
+</ParamField>
+
+### Response
+
+Returns the newly created plan object with status `Borrador`.
+
+### Example Request
+
+```bash cURL
+curl -X POST https://api.example.com/api/planning/create \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "anio": 2026,
+    "semana": 11
+  }'
+```
+
+## Assign Order
+
+```http
+POST /api/planning/assign-order
+```
+
+**Permission:** `ASSIGN_OPERATIONS`
+
+Assigns a production order to a specific day, shift, and process.
+
+### Request Body
+
+<ParamField body="plan_id" type="integer" required>
+  Plan ID
+</ParamField>
+
+<ParamField body="orden_id" type="integer" required>
+  Production order ID
+</ParamField>
+
+<ParamField body="proceso_id" type="integer" required>
+  Process ID (1-9)
+</ParamField>
+
+<ParamField body="turno" type="string" required>
+  Shift: T1, T2, or T3
+</ParamField>
+
+<ParamField body="dia_semana" type="integer" required>
+  Day of week (1=Monday, 7=Sunday)
+</ParamField>
+
+<ParamField body="cantidad_planificada" type="number" required>
+  Planned production quantity
+</ParamField>
+
+### Example Request
+
+```bash cURL
+curl -X POST https://api.example.com/api/planning/assign-order \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "plan_id": 5,
+    "orden_id": 12347,
+    "proceso_id": 3,
+    "turno": "T2",
+    "dia_semana": 3,
+    "cantidad_planificada": 2500
+  }'
+```
+
+## Update Order Assignment
+
+```http
+POST /api/planning/update-order
+```
+
+**Permission:** `ASSIGN_OPERATIONS`
+
+Updates an existing order assignment.
+
+### Request Body
+
+<ParamField body="id" type="integer" required>
+  Assignment ID
+</ParamField>
+
+<ParamField body="plan_id" type="integer" required>
+  Plan ID
+</ParamField>
+
+Plus any fields from assign-order to update.
+
+## Delete Order Assignment
+
+```http
+POST /api/planning/delete-order
+```
+
+**Permission:** `ASSIGN_OPERATIONS`
+
+Removes an order from the plan.
+
+### Request Body
+
+<ParamField body="id" type="integer" required>
+  Assignment ID to delete
+</ParamField>
+
+<ParamField body="plan_id" type="integer" required>
+  Plan ID
+</ParamField>
+
+## Assign Personnel
+
+```http
+POST /api/planning/assign-personnel
+```
+
+**Permission:** `ASSIGN_OPERATIONS`
+
+Assigns a person to a process, shift, and day.
+
+### Request Body
+
+<ParamField body="plan_id" type="integer" required>
+  Plan ID
+</ParamField>
+
+<ParamField body="persona_id" type="integer" required>
+  Person ID
+</ParamField>
+
+<ParamField body="proceso_id" type="integer" required>
+  Process ID
+</ParamField>
+
+<ParamField body="turno" type="string" required>
+  Shift: T1, T2, T3
+</ParamField>
+
+<ParamField body="dia_semana" type="integer" required>
+  Day of week (1-7)
+</ParamField>
+
+### Example Request
+
+```bash cURL
+curl -X POST https://api.example.com/api/planning/assign-personnel \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "plan_id": 5,
+    "persona_id": 42,
+    "proceso_id": 2,
+    "turno": "T1",
+    "dia_semana": 2
+  }'
+```
+
+## Update Personnel Assignment
+
+```http
+POST /api/planning/update-personnel
+```
+
+**Permission:** `ASSIGN_OPERATIONS`
+
+Updates an existing personnel assignment.
+
+## Delete Personnel Assignment
+
+```http
+POST /api/planning/delete-personnel
+```
+
+**Permission:** `ASSIGN_OPERATIONS`
+
+Removes a personnel assignment from the plan.
+
+## Publish Plan
+
+```http
+POST /api/planning/publish
+```
+
+**Permission:** `ASSIGN_OPERATIONS`
+
+Publishes a plan, making it visible to production operators and locking further modifications.
+
+### Request Body
+
+<ParamField body="id" type="integer" required>
+  Plan ID to publish
+</ParamField>
+
+### Business Rules
+
+- Once published, a plan cannot be unpublished (create a new plan instead)
+- Published plans are used by the Bitácora system for shift inheritance
+- All personnel and order assignments should be finalized before publishing
+
+### Example Request
+
+```bash cURL
+curl -X POST https://api.example.com/api/planning/publish \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"id": 5}'
+```
+
+## Record Deviation
+
+```http
+POST /api/planning/deviation
+```
+
+**Permission:** `MANAGE_PRODUCTION`
+
+Records a deviation from the planned schedule.
+
+### Request Body
+
+<ParamField body="plan_id" type="integer" required>
+  Plan ID
+</ParamField>
+
+<ParamField body="bitacora_id" type="integer" required>
+  Bitácora ID where deviation occurred
+</ParamField>
+
+<ParamField body="orden_id" type="integer" required>
+  Order ID affected
+</ParamField>
+
+<ParamField body="proceso_id" type="integer" required>
+  Process ID
+</ParamField>
+
+<ParamField body="motivo_id" type="integer" required>
+  Deviation reason ID (from motivos catalog)
+</ParamField>
+
+<ParamField body="cantidad_planificada" type="number" required>
+  Originally planned quantity
+</ParamField>
+
+<ParamField body="cantidad_real" type="number" required>
+  Actual produced quantity
+</ParamField>
+
+<ParamField body="comentarios" type="string">
+  Additional comments or context
+</ParamField>
+
+### Example Request
+
+```bash cURL
+curl -X POST https://api.example.com/api/planning/deviation \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "plan_id": 5,
+    "bitacora_id": 43,
+    "orden_id": 12345,
+    "proceso_id": 1,
+    "motivo_id": 2,
+    "cantidad_planificada": 1500,
+    "cantidad_real": 1200,
+    "comentarios": "Paro no programado por falla eléctrica"
+  }'
+```
+
+## Get Deviation Reasons
+
+```http
+GET /api/planning/motivos-desviacion
+```
+
+**Permission:** `VIEW_PRODUCTION`
+
+Returns the catalog of deviation reasons.
+
+### Example Response
+
+```json
+[
+  {"id": 1, "motivo": "Falta de materia prima"},
+  {"id": 2, "motivo": "Falla de equipo"},
+  {"id": 3, "motivo": "Ausencia de personal"},
+  {"id": 4, "motivo": "Cambio de prioridad"},
+  {"id": 5, "motivo": "Problema de calidad"}
+]
+```
+
+## Get Deviations
+
+```http
+GET /api/planning/desviaciones?bitacora_id={id}
+```
+
+**Permission:** `VIEW_PRODUCTION`
+
+Returns all deviations for a specific shift.
+
+### Query Parameters
+
+<ParamField query="bitacora_id" type="integer" required>
+  Bitácora ID
+</ParamField>
+
+## Get Plan KPIs
+
+```http
+GET /api/planning/kpi/:plan_id
+```
+
+**Permission:** `VIEW_PRODUCTION`
+
+Calculates performance metrics for a completed week.
+
+### Path Parameters
+
+<ParamField path="plan_id" type="integer" required>
+  Plan ID
+</ParamField>
+
+### Response
+
+<ResponseField name="cumplimiento_global" type="number">
+  Overall plan fulfillment percentage (0-100)
+</ResponseField>
+
+<ResponseField name="total_planificado" type="number">
+  Total planned production across all orders
+</ResponseField>
+
+<ResponseField name="total_producido" type="number">
+  Total actual production
+</ResponseField>
+
+<ResponseField name="ordenes_completadas" type="integer">
+  Number of orders meeting 100% target
+</ResponseField>
+
+<ResponseField name="ordenes_totales" type="integer">
+  Total orders in plan
+</ResponseField>
+
+<ResponseField name="desviaciones_count" type="integer">
+  Number of deviations recorded
+</ResponseField>
+
+<ResponseField name="por_proceso" type="array">
+  Fulfillment breakdown by process
+</ResponseField>
+
+### Example Response
+
+```json
+{
+  "cumplimiento_global": 92.5,
+  "total_planificado": 50000,
+  "total_producido": 46250,
+  "ordenes_completadas": 8,
+  "ordenes_totales": 10,
+  "desviaciones_count": 3,
+  "por_proceso": [
+    {
+      "proceso_id": 1,
+      "proceso_nombre": "Extrusor PP",
+      "cumplimiento": 98.2
+    },
+    {
+      "proceso_id": 2,
+      "proceso_nombre": "Telares",
+      "cumplimiento": 87.5
+    }
+  ]
+}
+```
+
+## Planning Workflow
+
+<Steps>
+  <Step title="Create Plan">
+    Create a plan for next week (e.g., Week 11)
+  </Step>
+  <Step title="Assign Orders">
+    Assign production orders to specific days, shifts, and processes
+  </Step>
+  <Step title="Assign Personnel">
+    Assign available personnel to cover all shifts and processes
+  </Step>
+  <Step title="Review & Adjust">
+    Review capacity, balance workload, adjust as needed
+  </Step>
+  <Step title="Publish">
+    Publish the plan to make it active and visible to operators
+  </Step>
+  <Step title="Execute">
+    During the week, operators see planned orders in their bitácoras
+  </Step>
+  <Step title="Track Deviations">
+    Record deviations when actual differs from plan
+  </Step>
+  <Step title="Analyze KPIs">
+    After week completion, review KPIs to improve future planning
+  </Step>
+</Steps>
+
+## Best Practices
+
+<Tip>
+**Advance Planning**: Create plans at least 3-5 days before the target week to allow for material procurement and personnel coordination.
+</Tip>
+
+<Check>
+**Capacity Validation**: Ensure planned quantities are realistic given:
+- Machine capacity and availability
+- Personnel skill levels and availability
+- Material lead times
+- Maintenance schedules
+</Check>
+
+<Warning>
+**Deviation Tracking**: Always record deviations with specific reasons. This data drives continuous improvement and helps identify systemic bottlenecks.
+</Warning>
+
+## Related Endpoints
+
+- [Bitácora API](/api/production/bitacora) - Shift execution against plan
+- [Production Orders](/api/production/ordenes) - Order management
+- [Personnel API](/api/personnel/personal) - Personnel management

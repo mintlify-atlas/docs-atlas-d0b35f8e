@@ -1,0 +1,574 @@
+---
+title: Conversión de Sacos Vestidos (Lined Bag Conversion)
+description: Integrated process that simultaneously converts fabric and inserts PE liner to create lined industrial bags
+---
+
+## Overview
+
+Conversión de Sacos Vestidos (Process ID: 9) is an integrated conversion process that simultaneously cuts fabric, forms PE liners, inserts the liner, and sews the bottom seam—all in a single operation. This produces "dressed" bags with internal polyethylene lining for moisture-sensitive products.
+
+### Process Characteristics
+
+- **Process Type**: Order-based production
+- **Production Unit**: unidades (units/bags)
+- **Product**: Sewn bags with inserted PE liner
+- **Machines**: 1 specialized line (CONV03)
+- **Order Pattern**: `9\d{6}` (e.g., 9000456)
+- **Production Target**: 10,000 bags per shift
+- **Speed**: 22 bags/min nominal
+
+### What This Process Does
+
+The Vestidos process:
+- **Receives**: Fabric rolls (printed/laminated/natural), PE film rolls from Extrusión PE, sewing thread
+- **Transforms**: Fabric + PE film → Complete lined bags
+- **Delivers**: Packaged lined bags ready for dispatch
+- **Method**: Integrated cutting, liner forming, pneumatic insertion, and bottom seam stitching
+
+## Production Flow
+
+### Upstream Dependencies
+
+Vestidos consumes materials from multiple sources:
+
+**Bag Fabric**:
+- **Telares (Process 2)**: Natural woven fabric
+  - Format: `R{3-digit}-T{2-digit}`
+- **Laminado (Process 3)**: Laminated fabric
+  - Format: `R{3-digit}-T{2-digit}-L{3-digit}`
+- **Imprenta (Process 4)**: Printed fabric
+  - Format: `R{3-digit}-T{2-digit}-L{3-digit}-I{3-digit}`
+
+**Liner Material**:
+- **Extrusión PE (Process 6)**: PE film rolls
+  - Tracked via lot ID (lote_pe_id)
+
+### Downstream Consumers
+
+Finished lined bags are **end products** (no downstream production).
+
+### Production Tracking Method
+
+**Unit Count Method** (`ConversionSacosVestidosContract.js:125-128`):
+
+```javascript
+reglasProduccion: {
+  metodo: 'conteo_unidades',
+  unidad: 'unidades'
+}
+```
+
+## Data Structures
+
+### Key Tables
+
+#### registros_trabajo
+```javascript
+{
+  linea_ejecucion_id: FK,
+  bitacora_id: FK,
+  maquina_id: 7, // CONV03
+  cantidad_producida: sacos_total,
+  merma_kg: desperdicio_tela_kg,
+  parametros: JSON {
+    sacos_total: integer,
+    desperdicio_tela_kg: decimal,
+    destino_desperdicio_tela: 'Peletizado' | 'Descarte final',
+    retorno_liner_kg: decimal,
+    observaciones: text
+  }
+}
+```
+
+#### vestidos_consumo_rollo_saco
+Fabric roll consumption:
+```javascript
+{
+  bitacora_id: FK,
+  maquina_id: 7,
+  orden_id: FK,
+  codigo_rollo: text,
+  origen_proceso_id: 2 | 3 | 4, // Inferred from code pattern
+  sacos_producidos: integer,
+  lote_id: FK, // Generated with -V suffix
+  registro_trabajo_id: FK
+}
+```
+
+#### vestidos_consumo_rollo_pe
+PE liner consumption:
+```javascript
+{
+  bitacora_id: FK,
+  maquina_id: 7,
+  orden_id: FK,
+  codigo_lote_pe: text, // From Extrusión PE
+  lote_pe_id: FK,
+  registro_trabajo_id: FK
+}
+```
+
+#### vestidos_calidad_muestras
+Quality samples (4 inspections per shift):
+```javascript
+{
+  bitacora_id: FK,
+  maquina_id: 7,
+  orden_id: FK,
+  inspeccion_indice: 1-4,
+  parametro: 'ancho_saco' | 'largo_saco' | 'doble_costura' | 'puntadas_costura' | 'sello_liner',
+  valor: decimal,
+  valor_nominal: decimal,
+  resultado: 'Cumple' | 'No cumple'
+}
+```
+
+### Lot Generation
+
+**Per-Roll Lot with -V Suffix** (`vestidos.service.js:203-219`):
+
+Each converted fabric roll generates a lot:
+```javascript
+codigo_lote = `${codigo_rollo}-V${correlativo}`
+// Example: R047-T05-L001-I001-V001
+```
+
+The "-V" suffix distinguishes Vestidos lots from standard Conversión ("-C") lots.
+
+## Quality Parameters
+
+### Critical Parameters
+
+#### 1. Bag Width (ancho_saco)
+- **Unit**: inches
+- **Tolerance**: ±0.25 inches
+- **Nominal**: From order specification
+- **Critical**: No (informational)
+- **Sampling**: 4 inspections per shift
+
+#### 2. Bag Length (largo_saco)
+- **Unit**: inches
+- **Tolerance**: ±0.25 inches
+- **Nominal**: From order specification
+- **Critical**: No
+- **Sampling**: 4 inspections per shift
+
+#### 3. Bottom Fold (doble_costura)
+- **Unit**: inches
+- **Tolerance**: ±0.125 inches
+- **Nominal**: From order specification
+- **Critical**: No
+- **Sampling**: 4 inspections per shift
+
+#### 4. Stitch Count (puntadas_costura)
+- **Unit**: stitches per 10 cm
+- **Range**: 12-14 stitches
+- **Nominal**: 13 stitches
+- **Critical**: No
+- **Sampling**: 4 inspections per shift
+
+#### 5. Liner Seal (sello_liner) — CRITICAL
+- **Type**: Pass/Fail (Cumple/No cumple)
+- **Nominal**: Cumple
+- **Critical**: **YES**
+- **Sampling**: 4 inspections per shift
+- **Method**: Visual inspection of inserted liner
+- **Impact**: Poor seal = moisture contamination risk
+
+### Sampling Frequency (`ConversionSacosVestidosContract.js:112-116`)
+
+```javascript
+frecuenciaMuestreo: {
+  registrosFormalsPorTurno: 4,
+  omisionRequiereMotivo: true,
+  permiteCopiarMuestraAnterior: false
+}
+```
+
+Each inspection must measure all 5 parameters (including liner seal).
+
+## Business Logic
+
+### Machine Restrictions (`vestidos.service.js:94-98`)
+
+**Hard validation rule**:
+```javascript
+const specs = JSON.parse(orden.especificaciones || '{}');
+if (specs.con_fuelle === true || specs.microperforado === true) {
+  throw new ValidationError(`La máquina ${maquina.nombre_visible} no puede procesar sacos con fuelle o microperforados.`);
+}
+```
+
+**Machine Capabilities** (`ConversionSacosVestidosContract.js:134-136`):
+```javascript
+reglasAsignacionMaquina: {
+  'CONV03': { con_fuelle: false, microperforado: false }
+}
+```
+
+CONV03 cannot process bags with:
+- Gussets (con_fuelle)
+- Microperforation (microperforado)
+
+### Origin Process Inference (`vestidos.service.js:221-227`):
+
+```javascript
+let origenProcesoId = 2; // Telares (default)
+if (rollo.codigo_rollo.includes('-I')) {
+  origenProcesoId = 4; // Imprenta
+} else if (rollo.codigo_rollo.includes('-L')) {
+  origenProcesoId = 3; // Laminado
+}
+```
+
+System automatically detects fabric source from roll code pattern.
+
+### Dual Material Validation (`vestidos.service.js:129-137`):
+
+```javascript
+const sacos_total = rollos_saco.reduce((acc, r) => acc + (r.sacos_producidos || 0), 0);
+if (sacos_total > 0) {
+  if (rollos_saco.length === 0) {
+    throw new ValidationError('Debe declarar al menos un rollo de saco cuando hay producción.');
+  }
+  if (rollos_pe.length === 0) {
+    throw new ValidationError('Al menos un rollo PE debe declararse por turno con producción > 0.');
+  }
+}
+```
+
+Production requires **both** fabric and PE rolls declared.
+
+### Quality Auto-Calculation (`vestidos.service.js:257-277`):
+
+```javascript
+for (const m of muestras) {
+  let resultado = 'Cumple';
+  let valorNominal = null;
+
+  if (['ancho_saco', 'largo_saco', 'doble_costura'].includes(m.parametro)) {
+    valorNominal = specs[m.parametro];
+    const tolerancia = (m.parametro === 'doble_costura') ? 0.125 : 0.25;
+    if (valorNominal !== null && valorNominal !== undefined) {
+      if (Math.abs(m.valor - valorNominal) > tolerancia) {
+        resultado = 'No cumple';
+      }
+    }
+  } else if (m.parametro === 'puntadas_costura') {
+    valorNominal = 13;
+    if (m.valor < 12 || m.valor > 14) {
+      resultado = 'No cumple';
+    }
+  } else if (m.parametro === 'sello_liner') {
+    resultado = m.resultado; // Already validated as 'Cumple' or 'No cumple'
+  }
+}
+```
+
+### Waste Segregation
+
+Vestidos tracks **two types** of waste:
+
+1. **Fabric Waste** (`desperdicio_tela_kg`):
+   - Destination: Peletizado or Descarte final
+   - Tracked in `registros_trabajo.merma_kg`
+
+2. **PE Liner Returns** (`retorno_liner_kg`):
+   - Destination: Return to Extrusor PE
+   - Tracked in `parametros.retorno_liner_kg`
+
+## API Endpoints
+
+### GET `/api/vestidos/detalle`
+
+Returns Vestidos line status:
+
+**Response**:
+```javascript
+{
+  maquina: { id: 7, codigo: 'CONV03', nombre_visible: 'Convertidora 3' },
+  estado_proceso: 'Completo',
+  ultimo_registro: {
+    id: 115,
+    orden_id: 456,
+    codigo_orden: '9000456',
+    cantidad_producida: 10200,
+    merma_kg: 24.5,
+    parametros: '{ "sacos_total": 10200, "desperdicio_tela_kg": 24.5, "retorno_liner_kg": 12.3, ... }'
+  },
+  rollos_saco: [
+    {
+      codigo_rollo: 'R047-T05-L001-I001',
+      origen_proceso_id: 4,
+      sacos_producidos: 10200,
+      lote_id: 89
+    }
+  ],
+  rollos_pe: [
+    {
+      codigo_lote_pe: '6000123-002',
+      lote_pe_id: 34
+    }
+  ],
+  muestras_calidad: [
+    {
+      inspeccion_indice: 1,
+      parametro: 'ancho_saco',
+      valor: 22.5,
+      valor_nominal: 22.5,
+      resultado: 'Cumple'
+    },
+    {
+      inspeccion_indice: 1,
+      parametro: 'largo_saco',
+      valor: 36.0,
+      valor_nominal: 36.0,
+      resultado: 'Cumple'
+    },
+    {
+      inspeccion_indice: 1,
+      parametro: 'doble_costura',
+      valor: 2.0,
+      valor_nominal: 2.0,
+      resultado: 'Cumple'
+    },
+    {
+      inspeccion_indice: 1,
+      parametro: 'puntadas_costura',
+      valor: 13,
+      valor_nominal: 13,
+      resultado: 'Cumple'
+    },
+    {
+      inspeccion_indice: 1,
+      parametro: 'sello_liner',
+      resultado: 'Cumple'
+    }
+    // Repeat for inspections 2, 3, 4...
+  ],
+  muestra_fisica: {
+    ancho_muestra: 22.5,
+    largo_muestra: 36.0,
+    peso_muestra_gramos: 82.1,
+    observaciones: 'Muestra con liner incluido'
+  },
+  defectos: [],
+  desperdicio_tela_kg: 24.5,
+  destino_desperdicio_tela: 'Peletizado',
+  retorno_liner_kg: 12.3
+}
+```
+
+**Implementation**: `vestidos.service.js:16-55`
+
+### POST `/api/vestidos/guardar`
+
+Saves shift Vestidos data:
+
+**Request Body**:
+```javascript
+{
+  bitacora_id: 42,
+  orden_id: 456,
+  rollos_saco: [
+    {
+      codigo_rollo: 'R047-T05-L001-I001',
+      sacos_producidos: 10200
+    }
+  ],
+  rollos_pe: [
+    {
+      lote_pe_id: 34
+    }
+  ],
+  muestras: [
+    {
+      inspeccion_indice: 1,
+      parametro: 'ancho_saco',
+      valor: 22.5
+    },
+    {
+      inspeccion_indice: 1,
+      parametro: 'largo_saco',
+      valor: 36.0
+    },
+    {
+      inspeccion_indice: 1,
+      parametro: 'doble_costura',
+      valor: 2.0
+    },
+    {
+      inspeccion_indice: 1,
+      parametro: 'puntadas_costura',
+      valor: 13
+    },
+    {
+      inspeccion_indice: 1,
+      parametro: 'sello_liner',
+      resultado: 'Cumple'
+    }
+    // Repeat for inspections 2, 3, 4...
+  ],
+  muestra_fisica: {
+    ancho_muestra: 22.5,
+    largo_muestra: 36.0,
+    peso_muestra_gramos: 82.1,
+    observaciones: 'Muestra con liner incluido'
+  },
+  defectos: [],
+  desperdicio_tela_kg: 24.5,
+  destino_desperdicio_tela: 'Peletizado',
+  retorno_liner_kg: 12.3,
+  observaciones: ''
+}
+```
+
+**Response**:
+```javascript
+{
+  registro_id: 115,
+  estado: 'Completo'
+}
+```
+
+**Transaction Flow** (`vestidos.service.js:162-359`):
+1. Validate order and machine restrictions (no fuelle/microperforado)
+2. Validate dual material requirement (fabric + PE)
+3. Validate PE lots are not closed
+4. Delete previous shift data (idempotent)
+5. Get/create `linea_ejecucion`
+6. Save `registros_trabajo` with total bags and waste breakdown
+7. For each fabric roll:
+   - Find or create lot: `{codigo_rollo}-V{correlativo}`
+   - Infer origin process from code pattern
+   - Save fabric roll consumption
+8. For each PE roll:
+   - Validate lot exists and is active
+   - Save PE roll consumption
+9. Save quality samples (auto-calculate dimensional pass/fail)
+10. Save physical sample (optional)
+11. Save defects
+12. Calculate process state
+13. Update `bitacora_maquina_status`
+
+**Implementation**: `vestidos.service.js:60-360`  
+**Permission Required**: `MANAGE_PRODUCTION`
+
+## Machine Status States
+
+**Calculated in**: `vestidos.service.js:320-354`
+
+- **Sin datos**: No production, samples, defects, or waste
+- **Parcial**: Some data recorded
+- **Completo**:
+  - At least 1 fabric roll AND 1 PE roll
+  - 4 inspections (indices 1, 2, 3, 4)
+  - Each inspection has all 5 parameters (including sello_liner)
+- **Con desviación**: Complete but quality parameters failed
+
+**Completeness Check** (`vestidos.service.js:330-345`):
+```javascript
+const tieneProduccion = rollos_saco.length > 0;
+const tieneRollosPE = rollos_pe.length > 0;
+
+const indicesIndices = [...new Set(muestrasGuardadas.map(m => m.inspeccion_indice))];
+const tiene4Inspecciones = [1, 2, 3, 4].every(i => indicesIndices.includes(i));
+
+let parametrosOk = true;
+for (let i = 1; i <= 4; i++) {
+  const paramsInspec = muestrasGuardadas.filter(m => m.inspeccion_indice === i).map(m => m.parametro);
+  const requiredParams = ['ancho_saco', 'largo_saco', 'doble_costura', 'puntadas_costura', 'sello_liner'];
+  if (!requiredParams.every(p => paramsInspec.includes(p))) {
+    parametrosOk = false;
+    break;
+  }
+}
+
+if (tieneProduccion && tieneRollosPE && tiene4Inspecciones && parametrosOk) {
+  estado = 'Completo';
+}
+```
+
+## Traceability
+
+### Dual Material Flow
+
+```
+Imprenta produces: R047-T05-L001-I001
+Extrusión PE produces: 6000123-002
+          ↓
+Vestidos consumes both materials
+          ↓
+Vestidos generates lot: R047-T05-L001-I001-V001
+          ↓
+End product with full traceability:
+  - Fabric origin: Imprenta → Laminado → Telares → Extrusor PP
+  - Liner origin: Extrusión PE
+```
+
+### Waste Tracking
+
+**Fabric Waste**:
+- Destination: Peletizado (Process 8) or final discard
+- Unit: kg
+- Tracked separately from liner returns
+
+**Liner Returns**:
+- Destination: Return to Extrusor PE (Process 6) for reprocessing
+- Unit: kg
+- Not counted as waste, but as recoverable material
+
+## Operational Rules
+
+### Personnel Requirements (`ConversionSacosVestidosContract.js:47-51`)
+
+```javascript
+personalOperativo: {
+  minimo: 2,
+  maximo: 3,
+  reglasEspeciales: 'Requiere un operador especializado en la sincronización tela-liner y un auxiliar de empaque.'
+}
+```
+
+2-3 people required due to complexity of synchronized operation.
+
+### Stop Restrictions (`ConversionSacosVestidosContract.js:16-22`)
+
+```javascript
+restriccionesInicio: [
+  'Sin rollos de tela/laminado/impreso disponibles',
+  'Sin rollos de manga PE disponibles',
+  'Orden con con_fuelle = true (máquina no puede procesar sacos con fuelle)',
+  'Orden con microperforado = true (máquina no puede perforar)',
+  'Orden sin dimensiones definidas (ancho, largo o ancho_liner)'
+]
+```
+
+### Downtime Categories (`ConversionSacosVestidosContract.js:41-46`)
+
+- **Operational**: Fabric roll change, PE roll change, insertion adjustment, general cleaning
+- **Mechanical**: Liner sealer bar failure, pneumatic insertion system failure, dual blade misalignment
+- **Quality**: Mispositioned liner, open liner seal, miscut bag, defective seam
+- **External**: PE film shortage, base fabric shortage, electrical failure
+
+## Impact of Variability (`ConversionSacosVestidosContract.js:52-55`)
+
+```javascript
+impactoVariabilidad: [
+  {
+    condicion: 'Diferencia de estática entre tela y PE',
+    impacto: 'Dificulta la inserción del liner y provoca atascos en la zona de costura.'
+  },
+  {
+    condicion: 'Variación de ancho en manga PE',
+    impacto: 'Causa liners arrugados o bloqueos en el embudo de inserción.'
+  }
+]
+```
+
+## Related Processes
+
+- **Upstream (Fabric)**: [Telares](/processes/telares) (Process 2), [Laminado](/processes/laminado) (Process 3), [Imprenta](/processes/imprenta) (Process 4)
+- **Upstream (Liner)**: [Extrusión PE](/processes/extrusion-pe) (Process 6)
+- **Related**: [Conversión](/processes/conversion) (Process 5) — unlined bags
+- **Related**: [Production Orders](/quality/orders), [Lot Management](/quality/lots)

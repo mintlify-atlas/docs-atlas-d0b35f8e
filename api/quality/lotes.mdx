@@ -1,0 +1,906 @@
+---
+title: 'Lotes'
+description: 'API de gestión de lotes de producción y trazabilidad'
+---
+
+## Introducción
+
+Los lotes representan agrupaciones de producción vinculadas a órdenes de producción y bitácoras de turno. Cada lote tiene un código único generado automáticamente en formato `{codigo_orden}-{correlativo}` y transita por estados que controlan su ciclo de vida.
+
+**Estados de lote:**
+- `activo`: Lote disponible para consumo en procesos productivos
+- `pausado`: Lote temporalmente no disponible (requiere comentario)
+- `cerrado`: Estado terminal, no puede cambiar ni ser consumido (requiere comentario)
+
+**Relaciones:**
+- Cada lote pertenece a una orden de producción (`orden_produccion_id`)
+- Se genera en una bitácora de turno específica (`bitacora_id`)
+- Puede ser consumido por múltiples telares (tabla `telar_consumo_lote`)
+
+---
+
+## Listar Todos los Lotes
+
+<RequestExample>
+
+```bash Listar lotes
+curl -X GET https://api.prod-sys.com/api/lotes \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json"
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json Respuesta exitosa
+{
+  "status": "success",
+  "data": [
+    {
+      "id": 45,
+      "codigo_lote": "OP-2025-001-003",
+      "orden_produccion_id": 12,
+      "bitacora_id": 89,
+      "correlativo": 3,
+      "fecha_produccion": "2025-11-15",
+      "estado": "activo",
+      "comentario_estado": null,
+      "codigo_orden": "OP-2025-001",
+      "created_at": "2025-11-15T08:30:00Z",
+      "created_by": "operador.turno1",
+      "updated_at": null,
+      "updated_by": null
+    },
+    {
+      "id": 44,
+      "codigo_lote": "OP-2025-001-002",
+      "orden_produccion_id": 12,
+      "bitacora_id": 88,
+      "correlativo": 2,
+      "fecha_produccion": "2025-11-14",
+      "estado": "pausado",
+      "comentario_estado": "Problema en bobinado, revisar tensión",
+      "codigo_orden": "OP-2025-001",
+      "created_at": "2025-11-14T14:20:00Z",
+      "created_by": "operador.turno2",
+      "updated_at": "2025-11-14T16:45:00Z",
+      "updated_by": "supervisor.calidad"
+    }
+  ]
+}
+```
+
+</ResponseExample>
+
+**GET** `/api/lotes`
+
+Retorna todos los lotes disponibles (estados `activo` y `pausado`), ordenados por fecha de producción descendente.
+
+### Headers
+
+<ParamField header="Authorization" type="string" required>
+  Token de autenticación Bearer
+</ParamField>
+
+### Permisos Requeridos
+
+- `VIEW_QUALITY`: Ver información de calidad
+
+### Respuesta
+
+<ResponseField name="status" type="string">
+  Estado de la respuesta (`success`)
+</ResponseField>
+
+<ResponseField name="data" type="array">
+  Array de objetos lote
+  
+  <ResponseField name="id" type="integer">
+    ID único del lote
+  </ResponseField>
+  
+  <ResponseField name="codigo_lote" type="string">
+    Código único del lote en formato `{codigo_orden}-{correlativo}`
+  </ResponseField>
+  
+  <ResponseField name="orden_produccion_id" type="integer">
+    ID de la orden de producción asociada
+  </ResponseField>
+  
+  <ResponseField name="bitacora_id" type="integer">
+    ID de la bitácora de turno donde se generó el lote
+  </ResponseField>
+  
+  <ResponseField name="correlativo" type="integer">
+    Número secuencial del lote dentro de la orden
+  </ResponseField>
+  
+  <ResponseField name="fecha_produccion" type="string">
+    Fecha de producción en formato ISO 8601 (YYYY-MM-DD)
+  </ResponseField>
+  
+  <ResponseField name="estado" type="string">
+    Estado actual: `activo`, `pausado`, o `cerrado`
+  </ResponseField>
+  
+  <ResponseField name="comentario_estado" type="string" optional>
+    Comentario asociado al último cambio de estado
+  </ResponseField>
+  
+  <ResponseField name="codigo_orden" type="string">
+    Código de la orden de producción (JOIN)
+  </ResponseField>
+  
+  <ResponseField name="created_at" type="string">
+    Timestamp de creación
+  </ResponseField>
+  
+  <ResponseField name="created_by" type="string">
+    Usuario que creó el lote
+  </ResponseField>
+  
+  <ResponseField name="updated_at" type="string" optional>
+    Timestamp de última actualización
+  </ResponseField>
+  
+  <ResponseField name="updated_by" type="string" optional>
+    Usuario que actualizó el lote
+  </ResponseField>
+</ResponseField>
+
+---
+
+## Obtener Lotes Disponibles
+
+<RequestExample>
+
+```bash Lotes disponibles
+curl -X GET https://api.prod-sys.com/api/lotes/disponibles \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json"
+```
+
+</RequestExample>
+
+**GET** `/api/lotes/disponibles`
+
+Retorna lotes en estado `activo` o `pausado`, aptos para ser seleccionados en procesos de telar. Los lotes cerrados no aparecen en esta lista.
+
+### Headers
+
+<ParamField header="Authorization" type="string" required>
+  Token de autenticación Bearer
+</ParamField>
+
+### Permisos Requeridos
+
+- `VIEW_QUALITY`: Ver información de calidad
+
+### Respuesta
+
+Idéntica estructura al endpoint `/api/lotes`. Retorna solo lotes con `estado IN ('activo', 'pausado')`.
+
+---
+
+## Obtener Lotes por Orden
+
+<RequestExample>
+
+```bash Lotes de una orden
+curl -X GET https://api.prod-sys.com/api/lotes/orden/12 \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json"
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json Respuesta exitosa
+{
+  "status": "success",
+  "data": [
+    {
+      "id": 43,
+      "codigo_lote": "OP-2025-001-001",
+      "orden_produccion_id": 12,
+      "bitacora_id": 87,
+      "correlativo": 1,
+      "fecha_produccion": "2025-11-13",
+      "estado": "cerrado",
+      "comentario_estado": "Lote completamente consumido en telares",
+      "codigo_orden": "OP-2025-001",
+      "created_at": "2025-11-13T09:00:00Z",
+      "created_by": "operador.turno1",
+      "updated_at": "2025-11-14T10:00:00Z",
+      "updated_by": "supervisor.prod"
+    },
+    {
+      "id": 44,
+      "codigo_lote": "OP-2025-001-002",
+      "orden_produccion_id": 12,
+      "bitacora_id": 88,
+      "correlativo": 2,
+      "fecha_produccion": "2025-11-14",
+      "estado": "activo",
+      "comentario_estado": null,
+      "codigo_orden": "OP-2025-001",
+      "created_at": "2025-11-14T14:20:00Z",
+      "created_by": "operador.turno2",
+      "updated_at": null,
+      "updated_by": null
+    }
+  ]
+}
+```
+
+</ResponseExample>
+
+**GET** `/api/lotes/orden/:id`
+
+Retorna todos los lotes asociados a una orden de producción específica, ordenados por correlativo ascendente.
+
+### Path Parameters
+
+<ParamField path="id" type="integer" required>
+  ID de la orden de producción
+</ParamField>
+
+### Headers
+
+<ParamField header="Authorization" type="string" required>
+  Token de autenticación Bearer
+</ParamField>
+
+### Permisos Requeridos
+
+- `VIEW_QUALITY`: Ver información de calidad
+
+### Respuesta
+
+Array de lotes con la misma estructura que `/api/lotes`, ordenados por `correlativo ASC`.
+
+---
+
+## Obtener Consumo de Telar
+
+<RequestExample>
+
+```bash Consumo de telar
+curl -X GET "https://api.prod-sys.com/api/lotes/consumo-telar?maquina_id=5&bitacora_id=89" \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json"
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json Respuesta exitosa
+{
+  "status": "success",
+  "data": [
+    {
+      "id": 102,
+      "registro_trabajo_id": 456,
+      "maquina_id": 5,
+      "bitacora_id": 89,
+      "lote_id": 45,
+      "codigo_lote": "OP-2025-001-003",
+      "codigo_orden": "OP-2025-001",
+      "created_at": "2025-11-15T10:30:00Z",
+      "created_by": "operador.telar2"
+    },
+    {
+      "id": 103,
+      "registro_trabajo_id": 456,
+      "maquina_id": 5,
+      "bitacora_id": 89,
+      "lote_id": 44,
+      "codigo_lote": "OP-2025-001-002",
+      "codigo_orden": "OP-2025-001",
+      "created_at": "2025-11-15T10:30:00Z",
+      "created_by": "operador.telar2"
+    }
+  ]
+}
+```
+
+</ResponseExample>
+
+**GET** `/api/lotes/consumo-telar`
+
+Retorna los lotes declarados como consumidos por un telar específico en una bitácora determinada.
+
+### Query Parameters
+
+<ParamField query="maquina_id" type="integer" required>
+  ID de la máquina (telar)
+</ParamField>
+
+<ParamField query="bitacora_id" type="integer" required>
+  ID de la bitácora de turno
+</ParamField>
+
+### Headers
+
+<ParamField header="Authorization" type="string" required>
+  Token de autenticación Bearer
+</ParamField>
+
+### Permisos Requeridos
+
+- `VIEW_QUALITY`: Ver información de calidad
+
+### Respuesta
+
+<ResponseField name="status" type="string">
+  Estado de la respuesta (`success`)
+</ResponseField>
+
+<ResponseField name="data" type="array">
+  Array de registros de consumo
+  
+  <ResponseField name="id" type="integer">
+    ID del registro de consumo
+  </ResponseField>
+  
+  <ResponseField name="registro_trabajo_id" type="integer">
+    ID del registro de trabajo asociado
+  </ResponseField>
+  
+  <ResponseField name="maquina_id" type="integer">
+    ID de la máquina (telar)
+  </ResponseField>
+  
+  <ResponseField name="bitacora_id" type="integer">
+    ID de la bitácora de turno
+  </ResponseField>
+  
+  <ResponseField name="lote_id" type="integer">
+    ID del lote consumido
+  </ResponseField>
+  
+  <ResponseField name="codigo_lote" type="string">
+    Código del lote (JOIN)
+  </ResponseField>
+  
+  <ResponseField name="codigo_orden" type="string">
+    Código de la orden de producción (JOIN)
+  </ResponseField>
+  
+  <ResponseField name="created_at" type="string">
+    Timestamp de creación del registro
+  </ResponseField>
+  
+  <ResponseField name="created_by" type="string">
+    Usuario que registró el consumo
+  </ResponseField>
+</ResponseField>
+
+### Errores
+
+<ResponseField name="400" type="error">
+  Parámetros `maquina_id` y `bitacora_id` son obligatorios
+</ResponseField>
+
+---
+
+## Obtener Historial de Estado
+
+<RequestExample>
+
+```bash Historial de estado
+curl -X GET https://api.prod-sys.com/api/lotes/45/historial \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json"
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json Respuesta exitosa
+{
+  "status": "success",
+  "data": [
+    {
+      "id": 23,
+      "lote_id": 45,
+      "estado_anterior": "pausado",
+      "estado_nuevo": "activo",
+      "comentario": "Problema resuelto, lote disponible nuevamente",
+      "changed_by": "supervisor.calidad",
+      "changed_at": "2025-11-15T14:00:00Z"
+    },
+    {
+      "id": 22,
+      "lote_id": 45,
+      "estado_anterior": "activo",
+      "estado_nuevo": "pausado",
+      "comentario": "Detectada variación en parámetro de tensión",
+      "changed_by": "operador.calidad",
+      "changed_at": "2025-11-15T11:30:00Z"
+    }
+  ]
+}
+```
+
+</ResponseExample>
+
+**GET** `/api/lotes/:id/historial`
+
+Retorna el historial completo de cambios de estado de un lote, ordenado cronológicamente (más reciente primero).
+
+### Path Parameters
+
+<ParamField path="id" type="integer" required>
+  ID del lote
+</ParamField>
+
+### Headers
+
+<ParamField header="Authorization" type="string" required>
+  Token de autenticación Bearer
+</ParamField>
+
+### Permisos Requeridos
+
+- `VIEW_QUALITY`: Ver información de calidad
+
+### Respuesta
+
+<ResponseField name="status" type="string">
+  Estado de la respuesta (`success`)
+</ResponseField>
+
+<ResponseField name="data" type="array">
+  Array de registros de historial
+  
+  <ResponseField name="id" type="integer">
+    ID del registro de historial
+  </ResponseField>
+  
+  <ResponseField name="lote_id" type="integer">
+    ID del lote
+  </ResponseField>
+  
+  <ResponseField name="estado_anterior" type="string">
+    Estado antes del cambio
+  </ResponseField>
+  
+  <ResponseField name="estado_nuevo" type="string">
+    Estado después del cambio
+  </ResponseField>
+  
+  <ResponseField name="comentario" type="string" optional>
+    Comentario explicativo del cambio
+  </ResponseField>
+  
+  <ResponseField name="changed_by" type="string">
+    Usuario que ejecutó el cambio
+  </ResponseField>
+  
+  <ResponseField name="changed_at" type="string">
+    Timestamp del cambio
+  </ResponseField>
+</ResponseField>
+
+---
+
+## Obtener Trazabilidad Completa
+
+<RequestExample>
+
+```bash Trazabilidad del lote
+curl -X GET https://api.prod-sys.com/api/lotes/45/trazabilidad \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json"
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json Respuesta exitosa
+{
+  "status": "success",
+  "data": {
+    "lote": {
+      "id": 45,
+      "codigo_lote": "OP-2025-001-003",
+      "orden_produccion_id": 12,
+      "bitacora_id": 89,
+      "correlativo": 3,
+      "fecha_produccion": "2025-11-15",
+      "estado": "activo",
+      "comentario_estado": null,
+      "codigo_orden": "OP-2025-001",
+      "created_at": "2025-11-15T08:30:00Z",
+      "created_by": "operador.turno1"
+    },
+    "consumos": [
+      {
+        "id": 102,
+        "registro_trabajo_id": 456,
+        "maquina_id": 5,
+        "bitacora_id": 90,
+        "lote_id": 45,
+        "codigo_telar": "TELAR-05",
+        "fecha_operativa": "2025-11-15",
+        "turno": "mañana",
+        "created_at": "2025-11-15T10:30:00Z",
+        "created_by": "operador.telar2"
+      },
+      {
+        "id": 108,
+        "registro_trabajo_id": 461,
+        "maquina_id": 7,
+        "bitacora_id": 91,
+        "lote_id": 45,
+        "codigo_telar": "TELAR-07",
+        "fecha_operativa": "2025-11-15",
+        "turno": "tarde",
+        "created_at": "2025-11-15T15:45:00Z",
+        "created_by": "operador.telar4"
+      }
+    ],
+    "historial": [
+      {
+        "id": 23,
+        "lote_id": 45,
+        "estado_anterior": "pausado",
+        "estado_nuevo": "activo",
+        "comentario": "Problema resuelto",
+        "changed_by": "supervisor.calidad",
+        "changed_at": "2025-11-15T14:00:00Z"
+      },
+      {
+        "id": 22,
+        "lote_id": 45,
+        "estado_anterior": "activo",
+        "estado_nuevo": "pausado",
+        "comentario": "Detectada variación en tensión",
+        "changed_by": "operador.calidad",
+        "changed_at": "2025-11-15T11:30:00Z"
+      }
+    ]
+  }
+}
+```
+
+</ResponseExample>
+
+**GET** `/api/lotes/:id/trazabilidad`
+
+Retorna la trazabilidad completa de un lote: información del lote, dónde se produjo, dónde se consumió (telares) y su historial de estados.
+
+### Path Parameters
+
+<ParamField path="id" type="integer" required>
+  ID del lote
+</ParamField>
+
+### Headers
+
+<ParamField header="Authorization" type="string" required>
+  Token de autenticación Bearer
+</ParamField>
+
+### Permisos Requeridos
+
+- `VIEW_QUALITY`: Ver información de calidad
+
+### Respuesta
+
+<ResponseField name="status" type="string">
+  Estado de la respuesta (`success`)
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  Objeto de trazabilidad
+  
+  <ResponseField name="lote" type="object">
+    Información completa del lote (misma estructura que `/api/lotes`)
+  </ResponseField>
+  
+  <ResponseField name="consumos" type="array">
+    Array de registros de consumo en telares
+    
+    <ResponseField name="id" type="integer">
+      ID del registro de consumo
+    </ResponseField>
+    
+    <ResponseField name="registro_trabajo_id" type="integer">
+      ID del registro de trabajo asociado
+    </ResponseField>
+    
+    <ResponseField name="maquina_id" type="integer">
+      ID de la máquina (telar)
+    </ResponseField>
+    
+    <ResponseField name="bitacora_id" type="integer">
+      ID de la bitácora donde se consumió
+    </ResponseField>
+    
+    <ResponseField name="lote_id" type="integer">
+      ID del lote consumido
+    </ResponseField>
+    
+    <ResponseField name="codigo_telar" type="string">
+      Nombre visible del telar (JOIN con MAQUINAS)
+    </ResponseField>
+    
+    <ResponseField name="fecha_operativa" type="string">
+      Fecha operativa de la bitácora (YYYY-MM-DD)
+    </ResponseField>
+    
+    <ResponseField name="turno" type="string">
+      Turno de la bitácora (mañana, tarde, noche)
+    </ResponseField>
+    
+    <ResponseField name="created_at" type="string">
+      Timestamp del registro
+    </ResponseField>
+    
+    <ResponseField name="created_by" type="string">
+      Usuario que registró el consumo
+    </ResponseField>
+  </ResponseField>
+  
+  <ResponseField name="historial" type="array">
+    Array de cambios de estado (misma estructura que `/api/lotes/:id/historial`)
+  </ResponseField>
+</ResponseField>
+
+### Errores
+
+<ResponseField name="404" type="error">
+  Lote no encontrado
+</ResponseField>
+
+---
+
+## Cambiar Estado del Lote
+
+<RequestExample>
+
+```bash Pausar lote
+curl -X PATCH https://api.prod-sys.com/api/lotes/45/estado \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "estado": "pausado",
+    "comentario": "Detectada variación en parámetro de tensión durante control de calidad"
+  }'
+```
+
+```bash Reactivar lote
+curl -X PATCH https://api.prod-sys.com/api/lotes/45/estado \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "estado": "activo"
+  }'
+```
+
+```bash Cerrar lote
+curl -X PATCH https://api.prod-sys.com/api/lotes/45/estado \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "estado": "cerrado",
+    "comentario": "Lote completamente consumido, cerrado por fin de orden"
+  }'
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json Respuesta exitosa
+{
+  "status": "success",
+  "data": {
+    "id": 45,
+    "codigo_lote": "OP-2025-001-003",
+    "orden_produccion_id": 12,
+    "bitacora_id": 89,
+    "correlativo": 3,
+    "fecha_produccion": "2025-11-15",
+    "estado": "pausado",
+    "comentario_estado": "Detectada variación en parámetro de tensión durante control de calidad",
+    "codigo_orden": "OP-2025-001",
+    "created_at": "2025-11-15T08:30:00Z",
+    "created_by": "operador.turno1",
+    "updated_at": "2025-11-15T16:20:00Z",
+    "updated_by": "supervisor.calidad",
+    "motivo_cambio": "Detectada variación en parámetro de tensión durante control de calidad"
+  }
+}
+```
+
+```json Error - Transición inválida
+{
+  "status": "error",
+  "message": "Transición de estado no permitida: cerrado → activo."
+}
+```
+
+```json Error - Falta comentario
+{
+  "status": "error",
+  "message": "El comentario es obligatorio para pausar o cerrar un lote."
+}
+```
+
+```json Error - Lote cerrado
+{
+  "status": "error",
+  "message": "Un lote cerrado no puede cambiar de estado."
+}
+```
+
+</ResponseExample>
+
+**PATCH** `/api/lotes/:id/estado`
+
+Cambia el estado de un lote. Cualquier usuario autenticado puede ejecutarlo, quedando registrado el usuario que realizó el cambio.
+
+### Path Parameters
+
+<ParamField path="id" type="integer" required>
+  ID del lote
+</ParamField>
+
+### Headers
+
+<ParamField header="Authorization" type="string" required>
+  Token de autenticación Bearer
+</ParamField>
+
+### Body Parameters
+
+<ParamField body="estado" type="string" required>
+  Nuevo estado del lote: `activo`, `pausado`, o `cerrado`
+</ParamField>
+
+<ParamField body="comentario" type="string">
+  Comentario explicativo del cambio. **Obligatorio** para estados `pausado` y `cerrado`
+</ParamField>
+
+### Permisos Requeridos
+
+- Usuario autenticado (no requiere permisos específicos)
+
+### Transiciones de Estado Permitidas
+
+| Estado Actual | Estados Permitidos |
+|---------------|--------------------|
+| `activo`      | `pausado`, `cerrado` |
+| `pausado`     | `activo`, `cerrado` |
+| `cerrado`     | **Ninguno (terminal)** |
+
+### Reglas de Negocio
+
+1. **Transiciones válidas**: Solo se permiten las transiciones definidas en la tabla anterior
+2. **Comentario obligatorio**: Los estados `pausado` y `cerrado` requieren comentario no vacío
+3. **Estado terminal**: Un lote en estado `cerrado` no puede cambiar a ningún otro estado
+4. **Auditoría automática**: Cada cambio se registra en:
+   - Tabla `lote_historial_estado` (historial de cambios)
+   - Sistema de auditoría general (tabla `AUDIT_LOG`)
+5. **Usuario registrado**: El sistema captura el usuario del token JWT (`req.user.nombre` o `req.user.username`)
+
+### Respuesta
+
+<ResponseField name="status" type="string">
+  Estado de la respuesta (`success`)
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  Lote actualizado con la misma estructura que `/api/lotes`
+  
+  <ResponseField name="estado" type="string">
+    Nuevo estado aplicado
+  </ResponseField>
+  
+  <ResponseField name="comentario_estado" type="string">
+    Comentario del cambio de estado
+  </ResponseField>
+  
+  <ResponseField name="updated_at" type="string">
+    Timestamp de la actualización
+  </ResponseField>
+  
+  <ResponseField name="updated_by" type="string">
+    Usuario que ejecutó el cambio
+  </ResponseField>
+  
+  <ResponseField name="motivo_cambio" type="string">
+    Motivo del cambio (igual al comentario)
+  </ResponseField>
+</ResponseField>
+
+### Errores
+
+<ResponseField name="400" type="error">
+  - Campo `estado` es obligatorio
+  - Comentario obligatorio para `pausado` o `cerrado`
+  - Transición de estado no permitida
+</ResponseField>
+
+<ResponseField name="404" type="error">
+  Lote no encontrado
+</ResponseField>
+
+---
+
+## Modelo de Datos
+
+### Tabla `lotes`
+
+```sql
+CREATE TABLE lotes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  codigo_lote TEXT NOT NULL UNIQUE,
+  orden_produccion_id INTEGER NOT NULL,
+  bitacora_id INTEGER NOT NULL,
+  correlativo INTEGER NOT NULL,
+  fecha_produccion TEXT NOT NULL,
+  estado TEXT NOT NULL CHECK(estado IN ('activo', 'pausado', 'cerrado')),
+  comentario_estado TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by TEXT NOT NULL,
+  updated_at TEXT,
+  updated_by TEXT,
+  motivo_cambio TEXT,
+  FOREIGN KEY (orden_produccion_id) REFERENCES orden_produccion(id),
+  FOREIGN KEY (bitacora_id) REFERENCES bitacora_turno(id)
+);
+```
+
+### Tabla `telar_consumo_lote`
+
+Registra qué lotes fueron consumidos por qué telares en qué bitácoras.
+
+```sql
+CREATE TABLE telar_consumo_lote (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  registro_trabajo_id INTEGER NOT NULL,
+  maquina_id INTEGER NOT NULL,
+  bitacora_id INTEGER NOT NULL,
+  lote_id INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by TEXT NOT NULL,
+  FOREIGN KEY (registro_trabajo_id) REFERENCES registro_trabajo(id),
+  FOREIGN KEY (maquina_id) REFERENCES MAQUINAS(id),
+  FOREIGN KEY (bitacora_id) REFERENCES bitacora_turno(id),
+  FOREIGN KEY (lote_id) REFERENCES lotes(id)
+);
+```
+
+### Tabla `lote_historial_estado`
+
+Almacena el historial completo de cambios de estado de cada lote.
+
+```sql
+CREATE TABLE lote_historial_estado (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  lote_id INTEGER NOT NULL,
+  estado_anterior TEXT NOT NULL,
+  estado_nuevo TEXT NOT NULL,
+  comentario TEXT,
+  changed_by TEXT NOT NULL,
+  changed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (lote_id) REFERENCES lotes(id)
+);
+```
+
+---
+
+## Relación con Muestras
+
+Los lotes están relacionados con muestras de calidad a través de la tabla `muestras`. Cada muestra puede estar asociada a un `lote_id`, permitiendo rastrear resultados de análisis de calidad para lotes específicos.
+
+Para más información, consulta la [documentación de Muestras](/api/quality/muestras).

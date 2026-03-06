@@ -1,0 +1,594 @@
+---
+title: 'Quality Control'
+description: 'Quality sampling, batch traceability, and compliance validation'
+icon: 'microscope'
+---
+
+PROD-SYS enforces a quality-first production workflow with integrated sampling, batch management, and full traceability from raw materials to finished goods.
+
+## Key Capabilities
+
+<CardGroup cols={2}>
+  <Card title="Quality Samples" icon="vial">
+    Record parametric measurements per process with automatic pass/fail validation against specifications.
+  </Card>
+  <Card title="Batch Management" icon="boxes-stacked">
+    Generate unique batch codes (lotes) for every production run with state tracking and closure controls.
+  </Card>
+  <Card title="Traceability" icon="route">
+    Track material consumption from upstream batches to downstream processes with complete lineage.
+  </Card>
+  <Card title="Compliance Enforcement" icon="shield-check">
+    Block production until quality is validated; automatic rejection handling and supervisor escalation.
+  </Card>
+</CardGroup>
+
+---
+
+## Quality-First Workflow
+
+PROD-SYS enforces quality validation **before** production recording:
+
+### Execution Sequence
+
+1. **Open Shift**: Supervisor opens bitácora de turno
+2. **Quality Sampling**: Operators record quality samples (muestras) for each process
+3. **Validation Gate**: System validates samples against process contract requirements
+4. **Production Recording**: Only after quality validation can production quantities be recorded
+5. **Shift Closure**: Supervisor closes bitácora with automatic quality review
+
+**Enforcement Logic** (from `bitacora.service.js:167`):
+```javascript
+if (!hasMuestras) {
+  estadoProceso = 'ESPERANDO_CALIDAD';
+  siguienteAccion = 'REGISTRAR_CALIDAD';
+  accionesPermitidas = ['REGISTRAR_CALIDAD'];
+  bloqueos = [
+    `No se puede registrar producción hasta validar calidad 
+     (mínimo ${muestrasMinimas} muestras).`
+  ];
+}
+```
+
+**Result**: Production data entry is blocked in the UI until quality samples meet the minimum threshold.
+
+---
+
+## Quality Samples (Muestras)
+
+### Recording Samples
+
+**UI Flow**:
+1. Navigate to active bitácora → Select process
+2. Click **Add Quality Sample**
+3. Enter sample data:
+   - **Parametro**: e.g., "Espesor", "Gramaje", "Tracción"
+   - **Valor**: Measured value (numeric)
+   - **Valor Nominal**: Target/specification value
+   - **Resultado**: Pass/fail determination
+4. System validates parameter against process contract
+5. Sample saved and contributes to quality gate
+
+**Sample Schema** (`muestras`):
+```sql
+CREATE TABLE muestras (
+  id INTEGER PRIMARY KEY,
+  codigo_muestra TEXT,                 -- Optional sample identifier
+  fecha_analisis TEXT NOT NULL,        -- Sample date (defaults to today)
+  lote_id INTEGER,                     -- Link to batch (for finished goods)
+  bitacora_id INTEGER NOT NULL,        -- Link to shift
+  proceso_id INTEGER NOT NULL,         -- Process where sample was taken
+  maquina_id INTEGER,                  -- Machine where sample was taken
+  parametro TEXT NOT NULL,             -- Parameter name (e.g., "Gramaje")
+  valor REAL NOT NULL,                 -- Measured value
+  valor_nominal REAL,                  -- Target/spec value
+  resultado TEXT NOT NULL,             -- 'Cumple', 'No cumple', 'Rechazo', 'En espera'
+  usuario_modificacion TEXT,
+  fecha_modificacion TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (lote_id) REFERENCES lotes(id),
+  FOREIGN KEY (bitacora_id) REFERENCES bitacora_turno(id)
+);
+```
+
+**Source Reference**: `backend/domains/quality/muestra.repository.js`
+
+### Process-Specific Validation
+
+Each process contract defines valid parameters and ranges. Example from `ExtrusorPPContract.js`:
+
+```javascript
+validarParametro(parametro, valor) {
+  const valoresPermitidos = {
+    'Gramaje': { min: 50, max: 300, unidad: 'g/m2' },
+    'Espesor': { min: 0.1, max: 5.0, unidad: 'mm' },
+    'Tracción': { min: 10, max: 100, unidad: 'N' }
+  };
+  
+  const spec = valoresPermitidos[parametro];
+  if (!spec) {
+    return { valido: false, error: `Parámetro '${parametro}' no reconocido` };
+  }
+  
+  if (valor < spec.min || valor > spec.max) {
+    return { 
+      valido: false, 
+      error: `Valor fuera de rango: ${spec.min}-${spec.max} ${spec.unidad}` 
+    };
+  }
+  
+  return { valido: true };
+}
+```
+
+**Validation Flow** (from `bitacora.service.js:427`):
+```javascript
+for (const m of muestras) {
+  const valParam = contract.validarParametro(m.parametro, m.valor);
+  if (!valParam.valido) {
+    throw new ValidationError(
+      `Validación de parámetro fallida: ${valParam.error}`
+    );
+  }
+  
+  await this.muestraRepository.create({ ...m, bitacora_id, proceso_id });
+}
+```
+
+### Rejection Handling
+
+When a sample has `resultado = 'Rechazo'` or `'No cumple'`:
+
+1. **Automatic Escalation**: Bitácora state changes to `REVISION` on closure
+2. **Observaciones Required**: Operator must provide detailed explanation
+3. **Supervisor Review**: Supervisor must review and approve closure
+4. **Audit Trail**: All rejections logged in audit system
+
+**Detection Logic** (from `bitacora.service.js:148`):
+```javascript
+const RESULTADOS_REVISION = ['Rechazo', 'No cumple', 'En espera'];
+const hasRechazo = muestras.some(m => 
+  RESULTADOS_REVISION.includes(m.resultado)
+);
+
+if (hasRechazo) {
+  estadoProceso = 'REVISION';
+  siguienteAccion = 'CORREGIR_O_JUSTIFICAR';
+}
+```
+
+**Source Reference**: `backend/domains/production/bitacora.service.js:148-165`
+
+---
+
+## Batch Management (Lotes)
+
+### Batch Generation
+
+PROD-SYS automatically generates batch codes (lotes) for every production run:
+
+**Generation Rules**:
+- Format: `{codigo_orden}-{correlativo}`
+  - Example: `4567890-001` (first batch of order 4567890)
+  - Example: `2345678-012` (twelfth batch of order 2345678)
+- One batch per bitácora + orden combination
+- Correlativo auto-increments per order
+
+**Generation Flow** (from `lote.service.js:21`):
+```javascript
+async generarOObtenerLote(ordenId, bitacoraId, fechaProduccion, usuario) {
+  // 1. Check if batch already exists for this shift + order
+  let lote = await this.loteRepository.findByBitacoraYOrden(
+    bitacoraId, 
+    ordenId
+  );
+  
+  if (lote) {
+    return await this.loteRepository.findById(lote.id);
+  }
+  
+  // 2. Generate new batch
+  const maxCorrelativo = await this.loteRepository.getMaxCorrelativo(ordenId);
+  const nuevoCorrelativo = maxCorrelativo + 1;
+  
+  const codigoOrden = await this.loteRepository.findOrdenCodigo(ordenId);
+  const codigoLote = `${codigoOrden}-${String(nuevoCorrelativo).padStart(3, '0')}`;
+  
+  // 3. Create batch record
+  const nuevoId = await this.loteRepository.create({
+    codigo_lote: codigoLote,
+    orden_produccion_id: ordenId,
+    bitacora_id: bitacoraId,
+    correlativo: nuevoCorrelativo,
+    fecha_produccion: fechaProduccion,
+    estado: 'activo',
+    created_by: usuario
+  });
+  
+  return await this.loteRepository.findById(nuevoId);
+}
+```
+
+**Batch Schema** (`lotes`):
+```sql
+CREATE TABLE lotes (
+  id INTEGER PRIMARY KEY,
+  codigo_lote TEXT UNIQUE NOT NULL,    -- e.g., "4567890-001"
+  orden_produccion_id INTEGER NOT NULL,
+  bitacora_id INTEGER NOT NULL,        -- Shift where batch was produced
+  correlativo INTEGER NOT NULL,        -- Sequential number per order
+  fecha_produccion TEXT NOT NULL,      -- Production date
+  estado TEXT DEFAULT 'activo',        -- activo, pausado, cerrado
+  comentario_estado TEXT,
+  motivo_cambio TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  created_by TEXT,
+  updated_at TEXT,
+  updated_by TEXT,
+  FOREIGN KEY (orden_produccion_id) REFERENCES orden_produccion(id),
+  FOREIGN KEY (bitacora_id) REFERENCES bitacora_turno(id)
+);
+```
+
+**Source Reference**: `backend/domains/quality/lote.repository.js`
+
+### Batch State Management
+
+Batches progress through states:
+
+| State | Description | Allowed Transitions |
+|-------|-------------|---------------------|
+| **activo** | Available for consumption by downstream processes | → pausado, → cerrado |
+| **pausado** | Temporarily unavailable (quality hold, quarantine) | → activo, → cerrado |
+| **cerrado** | Final state, no further changes allowed | (terminal) |
+
+**State Transition Validation** (from `lote.service.js:110`):
+```javascript
+const transicionesPermitidas = {
+  activo:  ['pausado', 'cerrado'],
+  pausado: ['activo', 'cerrado']
+};
+
+const permitidas = transicionesPermitidas[lote.estado] || [];
+if (!permitidas.includes(nuevoEstado)) {
+  throw new ValidationError(
+    `Transición de estado no permitida: ${lote.estado} → ${nuevoEstado}.`
+  );
+}
+
+// Comentario obligatorio para pausado y cerrado
+if (['pausado', 'cerrado'].includes(nuevoEstado)) {
+  if (!comentario || comentario.trim().length === 0) {
+    throw new ValidationError(
+      'El comentario es obligatorio para pausar o cerrar un lote.'
+    );
+  }
+}
+```
+
+**State History** (`lote_historial_estado`):
+```sql
+CREATE TABLE lote_historial_estado (
+  id INTEGER PRIMARY KEY,
+  lote_id INTEGER NOT NULL,
+  estado_anterior TEXT NOT NULL,
+  estado_nuevo TEXT NOT NULL,
+  comentario TEXT,
+  changed_by TEXT NOT NULL,
+  changed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (lote_id) REFERENCES lotes(id)
+);
+```
+
+Every state change is logged with user and timestamp for compliance auditing.
+
+**Source Reference**: `backend/domains/quality/lote.service.js:97`
+
+---
+
+## Traceability
+
+### Upstream Consumption Tracking
+
+Downstream processes consume batches from upstream processes. Example: **Telar** (weaving) consumes batches from **ExtrusorPP** (extrusion).
+
+**Consumption Flow**:
+1. Operator selects process (e.g., Telar) in bitácora
+2. System displays available batches (estado = 'activo' or 'pausado')
+3. Operator selects which batches are being consumed
+4. System records consumption linkage
+
+**Consumption Schema** (`telar_consumo_lote`):
+```sql
+CREATE TABLE telar_consumo_lote (
+  id INTEGER PRIMARY KEY,
+  registro_trabajo_id INTEGER NOT NULL,  -- Production record consuming the batch
+  maquina_id INTEGER NOT NULL,           -- Weaving machine
+  bitacora_id INTEGER NOT NULL,          -- Shift where consumption occurred
+  lote_id INTEGER NOT NULL,              -- Batch being consumed
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  created_by TEXT,
+  FOREIGN KEY (registro_trabajo_id) REFERENCES registros_trabajo(id),
+  FOREIGN KEY (lote_id) REFERENCES lotes(id),
+  FOREIGN KEY (bitacora_id) REFERENCES bitacora_turno(id)
+);
+```
+
+**Consumption Validation** (from `lote.service.js:71`):
+```javascript
+async guardarConsumoTelar(maquinaId, bitacoraId, loteIds, registroTrabajoId, usuario) {
+  // 1. Delete previous consumption records for this work record
+  await this.loteRepository.deleteConsumoByRegistro(registroTrabajoId);
+  
+  // 2. Validate and record each batch consumption
+  for (const loteId of loteIds) {
+    const lote = await this.loteRepository.findById(loteId);
+    if (!lote) {
+      throw new ValidationError(`El lote con ID ${loteId} no existe.`);
+    }
+    if (lote.estado === 'cerrado') {
+      throw new ValidationError(
+        `El lote ${lote.codigo_lote} está cerrado y no puede ser declarado como consumido.`
+      );
+    }
+    
+    await this.loteRepository.saveConsumoTelar({
+      registro_trabajo_id: registroTrabajoId,
+      maquina_id: maquinaId,
+      bitacora_id: bitacoraId,
+      lote_id: loteId,
+      created_by: usuario
+    });
+  }
+}
+```
+
+**Validation Rules**:
+- Closed batches (`estado = 'cerrado'`) cannot be consumed
+- Consumption records are mutable (operator can change batch selection)
+- Each `registro_trabajo` can consume multiple batches
+
+**Source Reference**: `backend/domains/quality/lote.service.js:71`
+
+### Traceability Query
+
+The system provides complete traceability for any batch:
+
+**API Endpoint**: `GET /api/quality/lotes/:id/trazabilidad`
+
+**Response Structure**:
+```json
+{
+  "lote": {
+    "id": 123,
+    "codigo_lote": "4567890-001",
+    "codigo_orden": "4567890",
+    "fecha_produccion": "2026-03-06",
+    "estado": "activo"
+  },
+  "consumos": [
+    {
+      "codigo_telar": "TEL-01",
+      "fecha_operativa": "2026-03-07",
+      "turno": "Día"
+    },
+    {
+      "codigo_telar": "TEL-03",
+      "fecha_operativa": "2026-03-07",
+      "turno": "Noche"
+    }
+  ],
+  "historial": [
+    {
+      "estado_anterior": "activo",
+      "estado_nuevo": "pausado",
+      "comentario": "Hold por verificación de calidad",
+      "changed_by": "supervisor1",
+      "changed_at": "2026-03-07T10:30:00Z"
+    },
+    {
+      "estado_anterior": "pausado",
+      "estado_nuevo": "activo",
+      "comentario": "Liberado tras revisión OK",
+      "changed_by": "supervisor1",
+      "changed_at": "2026-03-07T14:15:00Z"
+    }
+  ]
+}
+```
+
+**Query Implementation** (from `lote.service.js:162`):
+```javascript
+async getTrazabilidad(loteId) {
+  const lote = await this.loteRepository.findById(loteId);
+  if (!lote) {
+    throw new NotFoundError('Lote no encontrado.');
+  }
+  
+  const consumos = await this.loteRepository.getConsumoByLoteId(loteId);
+  const historial = await this.loteRepository.getHistorialEstado(loteId);
+  
+  return { lote, consumos, historial };
+}
+```
+
+**Source Reference**: `backend/domains/quality/lote.service.js:162`
+
+---
+
+## Integration with Production
+
+### Quality Gate Enforcement
+
+The bitácora service enforces quality-first logic:
+
+**Process State Machine** (from `bitacora.service.js:180`):
+```javascript
+const muestrasMinimas = contract.frecuenciaMuestreo?.muestrasMinTurno || 1;
+const hasMuestras = muestras.length >= muestrasMinimas;
+const hasRegistros = registros.length > 0;
+
+if (!hasMuestras) {
+  estadoProceso = 'ESPERANDO_CALIDAD';
+  accionesPermitidas = ['REGISTRAR_CALIDAD'];
+  bloqueos = [
+    `No se puede registrar producción hasta validar calidad (mínimo ${muestrasMinimas} muestras).`
+  ];
+} else if (hasRegistros && hasMuestras) {
+  estadoProceso = 'COMPLETO';
+  accionesPermitidas = ['REGISTRAR_CALIDAD', 'REGISTRAR_PRODUCCION'];
+}
+```
+
+**Frontend Interpretation**:
+- UI disables "Add Production" button when `accionesPermitidas` does not include `'REGISTRAR_PRODUCCION'`
+- Display `bloqueos` messages as alert banners
+- Only enable production recording after quality validation
+
+### Batch-Linked Samples
+
+Samples can be linked to specific batches via `lote_id` foreign key:
+
+**Use Cases**:
+- **Finished goods testing**: Sample final product from a specific batch
+- **Quarantine decisions**: Sample triggers batch pause
+- **Certificate generation**: Export batch quality data for compliance docs
+
+**Query Pattern**:
+```sql
+SELECT m.*, l.codigo_lote
+FROM muestras m
+JOIN lotes l ON m.lote_id = l.id
+WHERE l.id = ?
+ORDER BY m.fecha_analisis DESC;
+```
+
+**Source Reference**: `backend/domains/quality/muestra.repository.js:6`
+
+---
+
+## Quality Analytics
+
+### Rejection Rate by Process
+
+**Query Pattern**:
+```sql
+SELECT 
+  proceso_id,
+  COUNT(*) as total_muestras,
+  SUM(CASE WHEN resultado IN ('Rechazo', 'No cumple') THEN 1 ELSE 0 END) as rechazos,
+  (CAST(SUM(CASE WHEN resultado IN ('Rechazo', 'No cumple') THEN 1 ELSE 0 END) AS REAL) / COUNT(*) * 100) as tasa_rechazo
+FROM muestras
+WHERE fecha_analisis >= date('now', '-30 days')
+GROUP BY proceso_id;
+```
+
+### Batch Closure Rate
+
+**Query Pattern**:
+```sql
+SELECT 
+  estado,
+  COUNT(*) as cantidad,
+  AVG(julianday(updated_at) - julianday(created_at)) as dias_promedio
+FROM lotes
+WHERE fecha_produccion >= date('now', '-90 days')
+GROUP BY estado;
+```
+
+### Traceability Coverage
+
+**Query Pattern** (batches with downstream consumption):
+```sql
+SELECT 
+  l.codigo_lote,
+  l.fecha_produccion,
+  COUNT(tcl.id) as consumos_registrados
+FROM lotes l
+LEFT JOIN telar_consumo_lote tcl ON l.id = tcl.lote_id
+WHERE l.fecha_produccion >= date('now', '-30 days')
+GROUP BY l.id
+ORDER BY consumos_registrados ASC;
+```
+
+---
+
+## Compliance & Auditing
+
+### Audit Trail
+
+All quality actions are logged via `auditService`:
+
+**Logged Events**:
+- Sample creation/modification
+- Batch state changes
+- Rejection occurrences
+- Traceability linkages
+
+**Audit Schema** (from `audit.service.js`):
+```sql
+CREATE TABLE auditoria (
+  id INTEGER PRIMARY KEY,
+  usuario TEXT NOT NULL,
+  accion TEXT NOT NULL,             -- 'CREATE', 'UPDATE', 'STATUS_CHANGE', 'DELETE'
+  entidad TEXT NOT NULL,            -- 'Muestra', 'Lote', 'BitacoraProceso'
+  entidad_id INTEGER,
+  valor_anterior TEXT,              -- JSON snapshot
+  valor_nuevo TEXT,                 -- JSON snapshot
+  motivo_cambio TEXT,
+  timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+**Example: Batch State Change Audit** (from `lote.service.js:143`):
+```javascript
+await this.auditService.logChange({
+  usuario,
+  accion: 'STATUS_CHANGE',
+  entidad: 'Lote',
+  entidad_id: loteId,
+  valor_anterior: { estado: lote.estado },
+  valor_nuevo: { estado: nuevoEstado },
+  motivo_cambio: comentario || 'Cambio de estado de lote'
+});
+```
+
+### Quality Hold Process
+
+**Standard Operating Procedure**:
+1. **Detection**: Quality sample fails specification
+2. **Automatic Block**: Bitácora state → `REVISION`
+3. **Batch Pause**: Operator pauses related batch with reason
+4. **Investigation**: Supervisor reviews root cause
+5. **Resolution**:
+   - **Release**: Batch reactivated with approval comment
+   - **Scrap**: Batch closed with scrap reason
+
+**Enforcement** (from `lote.service.js:123`):
+```javascript
+if (['pausado', 'cerrado'].includes(nuevoEstado)) {
+  if (!comentario || comentario.trim().length === 0) {
+    throw new ValidationError(
+      'El comentario es obligatorio para pausar o cerrar un lote.'
+    );
+  }
+}
+```
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Production Management" icon="industry" href="/features/production-management">
+    See how quality integrates with production order execution
+  </Card>
+  <Card title="Resource Tracking" icon="box" href="/features/resource-tracking">
+    Track raw material consumption alongside batch production
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/auth/login">
+    Explore quality management API endpoints
+  </Card>
+  <Card title="Dashboard" icon="chart-line" href="/introduction">
+    View real-time quality metrics and rejection trends
+  </Card>
+</CardGroup>

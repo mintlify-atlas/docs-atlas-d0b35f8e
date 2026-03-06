@@ -1,0 +1,358 @@
+---
+title: 'System Configuration'
+description: 'Configure PROD-SYS environment variables, database, and security settings'
+icon: 'gear'
+---
+
+## Overview
+
+PROD-SYS uses environment variables for system configuration, enabling flexible deployment across development, test, and production environments. All configuration is centralized in the `.env` file and loaded at application startup.
+
+## Environment Variables
+
+### Required Variables
+
+These variables are mandatory and the system will exit if they are not defined:
+
+#### JWT_SECRET
+
+```bash
+JWT_SECRET=your_secret_key_minimum_32_characters_long
+```
+
+- **Purpose**: Cryptographic key for signing and verifying JWT authentication tokens
+- **Requirements**: Minimum 32 characters for production security
+- **Security**: Never commit this value to version control
+- **Location**: `backend/config/env.js:8`
+
+<Warning>
+  Use a cryptographically random string in production. Generate with: `openssl rand -base64 32`
+</Warning>
+
+#### ADMIN_PASSWORD
+
+```bash
+ADMIN_PASSWORD=secure_password_for_bootstrap
+```
+
+- **Purpose**: Password for the initial system administrator during bootstrap
+- **Usage**: Only used during first-time initialization
+- **Security**: Change immediately after system initialization
+- **Location**: `backend/domains/bootstrap/bootstrap.service.js:50`
+
+### Optional Variables
+
+#### PORT
+
+```bash
+PORT=3000
+```
+
+- **Default**: 3000
+- **Purpose**: HTTP server port
+- **Location**: `backend/config/env.js:18`
+
+#### NODE_ENV
+
+```bash
+NODE_ENV=production
+```
+
+- **Default**: development
+- **Values**: `development`, `test`, `production`
+- **Effects**:
+  - Controls cookie security flags (secure flag in production)
+  - Determines database path (in-memory for test)
+  - Affects logging verbosity
+- **Location**: `backend/config/env.js:21`
+
+#### DB_SOURCE
+
+```bash
+DB_SOURCE=mfcalidad.sqlite
+```
+
+- **Default**: mfcalidad.sqlite
+- **Purpose**: SQLite database filename
+- **Location**: Database stored in `backend/database/`
+- **Reference**: `backend/config/database.js:7`
+
+#### LOG_LEVEL
+
+```bash
+LOG_LEVEL=info
+```
+
+- **Default**: info
+- **Values**: `error`, `warn`, `info`, `http`, `verbose`, `debug`
+- **Purpose**: Winston logger output level
+- **Location**: `.env.example:23`
+
+#### DISABLE_AUTH_CHECKS
+
+```bash
+DISABLEAUTH_CHECKS=false
+```
+
+- **Default**: true (development mode)
+- **Purpose**: Bypass role-based permission checks for development
+- **Security**: **MUST be set to `false` in production**
+- **Effect**: When `true`, all authenticated users have full system access
+- **Location**: `backend/middlewares/authorize.js:21`
+
+<Danger>
+  Setting `DISABLE_AUTH_CHECKS=true` in production disables all role-based access controls. This is a critical security risk.
+</Danger>
+
+## Configuration Files
+
+### Environment Configuration
+
+The system validates required environment variables at startup:
+
+```javascript
+// backend/config/env.js
+const requiredEnv = ['JWT_SECRET', 'ADMIN_PASSWORD'];
+
+requiredEnv.forEach((env) => {
+  if (!process.env[env]) {
+    console.error(`ERROR CRÍTICO: La variable de entorno ${env} es obligatoria.`);
+    process.exit(1);
+  }
+});
+```
+
+### Database Configuration
+
+Database settings are derived from environment variables:
+
+```javascript
+// backend/config/database.js
+module.exports = {
+  dbPath: path.resolve(__dirname, '../database', DB_SOURCE),
+  adminPassword: ADMIN_PASSWORD
+};
+```
+
+## Database Management
+
+### SQLite Configuration
+
+PROD-SYS uses SQLite with optimized settings for concurrency and reliability:
+
+**Write-Ahead Logging (WAL)**
+```sql
+PRAGMA journal_mode = WAL;
+```
+- Enables concurrent reads during writes
+- Improves performance for multi-user environments
+
+**Foreign Key Enforcement**
+```sql
+PRAGMA foreign_keys = ON;
+```
+- Enforces referential integrity constraints
+- Prevents orphaned records
+
+**Synchronous Mode**
+```sql
+PRAGMA synchronous = NORMAL;
+```
+- Balances performance and data safety
+- Acceptable for most production workloads
+
+**Location**: `backend/database/sqlite.js:23-28`
+
+### Schema Migrations
+
+The system automatically performs schema migrations on startup:
+
+1. **Schema Detection**: Checks existing table structure
+2. **Migration Execution**: Applies schema changes transactionally
+3. **Data Preservation**: Migrates existing data to new schema
+4. **Index Creation**: Ensures performance indexes exist
+
+**Key migrations:**
+- User domain redesign (persona-based access control)
+- Audit logging enhancements
+- Status field consolidation
+- Absence management tracking
+
+**Location**: `backend/database/sqlite.js:36-473`
+
+### Seed Data
+
+The following catalogs are automatically initialized:
+
+**Roles** (`roles` table):
+- Administrador
+- Inspector
+- Supervisor
+- Jefe de Operaciones
+- Gerencia
+- Operario
+
+**Areas** (`areas` table):
+- Producción
+- Departamento de Calidad
+- Mantenimiento
+- Administración
+
+**Operational Roles** (`roles_operativos` table):
+- Tejedor
+- Urdidor
+- Mecánico
+- Inspector de Calidad
+- Auxiliar
+- Supervisor de Planta
+
+**Location**: `backend/database/sqlite.js:1337-1391`
+
+## System Configuration Table
+
+The `sistema_config` table stores runtime system state:
+
+| Key | Values | Description |
+|-----|--------|-------------|
+| `estado_sistema` | `NO_INICIALIZADO`, `INICIALIZADO` | System initialization state |
+
+**Bootstrap Process**:
+1. System starts with `estado_sistema = 'NO_INICIALIZADO'`
+2. First admin user is created via bootstrap endpoint
+3. State changes to `INICIALIZADO`
+4. Normal authentication becomes available
+
+**Location**: `backend/domains/bootstrap/bootstrap.service.js:16-84`
+
+## Security Configuration
+
+### JWT Tokens
+
+**Token Generation**:
+- Algorithm: Configurable (default: HS256)
+- Expiration: 8 hours
+- Payload: User ID, username, role, persona information
+
+**Token Delivery**:
+- HTTP-only cookie (browser protection)
+- Authorization header (API clients)
+
+**Cookie Settings**:
+```javascript
+res.cookie('token', result.token, {
+  httpOnly: true,              // Prevents XSS access
+  secure: NODE_ENV === 'production',  // HTTPS only in production
+  sameSite: 'Strict',          // CSRF protection
+  maxAge: 8 * 60 * 60 * 1000   // 8 hours
+});
+```
+
+**Location**: `backend/domains/auth/auth.controller.js:19-24`
+
+### Password Security
+
+**Hashing**:
+- Algorithm: bcrypt
+- Cost factor: 10
+- Random salt per password
+
+**Account Protection**:
+- Failed login tracking
+- Automatic account lockout after 5 failed attempts
+- Timing attack mitigation (constant-time comparison)
+- Generic error messages (prevents user enumeration)
+
+**Location**: `backend/domains/auth/auth.service.js:54-75`
+
+### Session Management
+
+**Real-time Session Validation**:
+Every authenticated request verifies user account status:
+
+```javascript
+const user = await sqlite.get(
+  'SELECT estado_usuario FROM usuarios WHERE id = ?', 
+  [decoded.usuario_id]
+);
+
+if (!user || user.estado_usuario !== 'Activo') {
+  return next(new ForbiddenError('Su cuenta ha sido desactivada'));
+}
+```
+
+**Location**: `backend/middlewares/auth.middleware.js:34-42`
+
+## Configuration Validation
+
+### Startup Checks
+
+1. **Environment validation**: Required variables present
+2. **Database connectivity**: SQLite file accessible
+3. **Schema integrity**: Tables and indexes exist
+4. **Seed data**: Default catalogs initialized
+5. **Logger initialization**: Winston transport ready
+
+### Health Monitoring
+
+Monitor these indicators for system health:
+
+- Database file size (growth rate)
+- WAL file size (should auto-checkpoint)
+- Failed login attempts (potential attacks)
+- System initialization state
+- Active user sessions
+
+## Production Checklist
+
+Before deploying to production:
+
+<Check>
+  - [ ] Set `JWT_SECRET` to a cryptographically random 32+ character string
+  - [ ] Set `NODE_ENV=production`
+  - [ ] Set `DISABLE_AUTH_CHECKS=false`
+  - [ ] Configure secure `ADMIN_PASSWORD` for bootstrap
+  - [ ] Set appropriate `LOG_LEVEL` (warn or error recommended)
+  - [ ] Verify database file permissions (write access required)
+  - [ ] Enable HTTPS/TLS for secure cookie transmission
+  - [ ] Configure regular database backups
+  - [ ] Document admin credentials securely
+  - [ ] Test account lockout mechanism
+</Check>
+
+## Troubleshooting
+
+### Common Issues
+
+**System won't start**:
+- Check required environment variables are set
+- Verify `.env` file exists and is readable
+- Review startup logs for specific error
+
+**Database errors**:
+- Verify database file permissions
+- Check disk space availability
+- Ensure WAL mode is enabled
+
+**Authentication failures**:
+- Verify `JWT_SECRET` hasn't changed (invalidates existing tokens)
+- Check user account status in database
+- Review failed login attempt count
+
+**Permission denied errors (despite valid auth)**:
+- Verify `DISABLE_AUTH_CHECKS` is set correctly
+- Check user role assignments
+- Review permission mappings in `backend/shared/auth/permissions.js`
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="User Management" icon="users" href="/admin/user-management">
+    Managing user accounts and personnel
+  </Card>
+  <Card title="Roles & Permissions" icon="shield" href="/admin/roles-permissions">
+    Understanding the permission system
+  </Card>
+  <Card title="Audit Logs" icon="list" href="/admin/audit-logs">
+    Tracking system changes and user actions
+  </Card>
+</CardGroup>

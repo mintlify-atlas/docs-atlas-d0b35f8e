@@ -1,0 +1,383 @@
+---
+title: Installation
+description: "Complete installation guide for PROD-SYS"
+---
+
+# Installation Guide
+
+This guide walks you through the complete installation and deployment of PROD-SYS, from system requirements to production deployment.
+
+## System Requirements
+
+<CardGroup cols={2}>
+  <Card title="Node.js" icon="node-js">
+    Version 18.x or higher
+  </Card>
+  <Card title="NPM" icon="box">
+    Version 9.x or higher
+  </Card>
+  <Card title="SQLite" icon="database">
+    Version 3.x (bundled with npm package)
+  </Card>
+  <Card title="Memory" icon="memory">
+    Minimum 512MB RAM
+  </Card>
+</CardGroup>
+
+## Installation Steps
+
+<Steps>
+  <Step title="Clone the Repository">
+    Clone the PROD-SYS repository from GitHub:
+
+    ```bash
+    git clone https://github.com/Boris-Lazo/trazabilidad-y-calidad-industrial.git
+    cd trazabilidad-y-calidad-industrial
+    ```
+  </Step>
+
+  <Step title="Run Setup Script">
+    PROD-SYS includes an automated setup script that handles dependency installation and environment configuration:
+
+    ```bash
+    chmod +x setup.sh
+    ./setup.sh
+    ```
+
+    The script will:
+    - Install npm dependencies
+    - Create a `.env` file with secure defaults
+    - Generate a random JWT secret
+    - Set up the database file path
+  </Step>
+
+  <Step title="Configure Environment Variables">
+    Review and customize the generated `.env` file:
+
+    ```bash .env
+    # Security - JWT secret for authentication
+    JWT_SECRET=<generated_secure_random_value>
+
+    # Admin bootstrap password (change immediately after first login)
+    ADMIN_PASSWORD=<your_secure_admin_password>
+
+    # Server configuration
+    PORT=3000
+    NODE_ENV=production
+
+    # Database
+    DB_SOURCE=mfcalidad.sqlite
+
+    # Logging
+    LOG_LEVEL=info
+
+    # Development mode (disable for production)
+    DISABLE_AUTH_CHECKS=false
+    ```
+
+    <Warning>
+    **Critical Security Settings:**
+    - Change `ADMIN_PASSWORD` before first use
+    - Use a strong `JWT_SECRET` (minimum 32 characters)
+    - Set `DISABLE_AUTH_CHECKS=false` in production
+    - Use `NODE_ENV=production` for live deployments
+    </Warning>
+  </Step>
+
+  <Step title="Initialize the Database">
+    Start the server to automatically initialize the SQLite database:
+
+    ```bash
+    npm start
+    ```
+
+    The database initialization process will:
+    - Create all required tables with proper schemas
+    - Enable SQLite WAL mode for concurrent access
+    - Set up foreign key constraints
+    - Create indexes for performance
+    - Run any pending migrations
+
+    You'll see log output confirming database setup:
+    ```
+    Conectado a la base de datos SQLite [backend/database/mfcalidad.sqlite].
+    SQLite optimizado: WAL mode, Synchronous NORMAL, Foreign Keys ON.
+    Verificando/Creando esquema de base de datos...
+    ```
+  </Step>
+
+  <Step title="Bootstrap the System">
+    On first run, you must bootstrap the system to create the admin user:
+
+    1. Open your browser to `http://localhost:3000/bootstrap.html`
+    2. Enter the `ADMIN_PASSWORD` from your `.env` file
+    3. Set a new secure password for the admin account
+    4. The system will create the admin user and mark bootstrap as complete
+
+    <Note>
+    Bootstrap can only be performed once. After completion, the bootstrap endpoint is permanently disabled for security.
+    </Note>
+  </Step>
+
+  <Step title="Verify Installation">
+    Test your installation by logging in:
+
+    1. Navigate to `http://localhost:3000/login.html`
+    2. Log in with username `admin` and your new password
+    3. You should see the PROD-SYS dashboard
+
+    Run the test suite to verify all components:
+
+    ```bash
+    npm test
+    ```
+  </Step>
+</Steps>
+
+## Configuration Options
+
+### Environment Variables Reference
+
+All environment variables from `.env.example`:
+
+<ParamField path="JWT_SECRET" type="string" required>
+  Secret key for signing JWT tokens. Must be at least 32 characters. Use a cryptographically secure random value.
+  
+  Generate with: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
+</ParamField>
+
+<ParamField path="ADMIN_PASSWORD" type="string" required>
+  Bootstrap password for initial admin account creation. Only used during system bootstrap.
+</ParamField>
+
+<ParamField path="PORT" type="number" default="3000">
+  HTTP port for the Express server.
+</ParamField>
+
+<ParamField path="NODE_ENV" type="string" default="development">
+  Runtime environment: `development`, `test`, or `production`.
+  
+  In production mode:
+  - Detailed error messages are hidden
+  - Logging is optimized
+  - Security headers are enforced
+</ParamField>
+
+<ParamField path="DB_SOURCE" type="string" default="mfcalidad.sqlite">
+  SQLite database filename (stored in `backend/database/` directory).
+  
+  For testing, set to `:memory:` for an in-memory database.
+</ParamField>
+
+<ParamField path="LOG_LEVEL" type="string" default="info">
+  Winston logging level: `error`, `warn`, `info`, `http`, `verbose`, or `debug`.
+</ParamField>
+
+<ParamField path="DISABLE_AUTH_CHECKS" type="boolean" default="false">
+  **Development only**: Bypass permission checks for rapid prototyping.
+  
+  <Warning>
+  Must be `false` in production. Leaving this enabled bypasses all authorization.
+  </Warning>
+</ParamField>
+
+## Database Setup
+
+### Automatic Schema Management
+
+PROD-SYS automatically manages database schema through migrations defined in `backend/database/sqlite.js`:
+
+```javascript backend/database/sqlite.js
+const initDB = () => {
+  logger.info("Verificando/Creando esquema de base de datos...");
+  
+  // Automatic migration system
+  db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='personas'", (err, row) => {
+    if (row) {
+      // Check for schema changes and migrate
+      db.all("PRAGMA table_info(personas)", (err, columns) => {
+        // Perform migrations as needed
+      });
+    } else {
+      // Create table from scratch
+    }
+  });
+};
+```
+
+### SQLite Optimization
+
+The database is configured for optimal performance:
+
+```javascript backend/database/sqlite.js
+db.serialize(() => {
+  db.run("PRAGMA journal_mode = WAL;");      // Write-Ahead Logging for concurrency
+  db.run("PRAGMA synchronous = NORMAL;");    // Balance safety and performance
+  db.run("PRAGMA foreign_keys = ON;");       // Referential integrity
+});
+```
+
+<Tip>
+**WAL Mode Benefits:**
+- Multiple readers can access the database simultaneously
+- Writers don't block readers
+- Improved performance for concurrent operations
+- Better crash recovery
+</Tip>
+
+## Production Deployment
+
+### Using Process Manager (PM2)
+
+For production deployments, use PM2 to manage the Node.js process:
+
+<CodeGroup>
+
+```bash Install PM2
+npm install -g pm2
+```
+
+```bash Start with PM2
+pm2 start backend/server.js --name prod-sys
+```
+
+```bash PM2 Startup Script
+pm2 startup
+pm2 save
+```
+
+</CodeGroup>
+
+PM2 provides:
+- Automatic restart on crashes
+- Log management
+- Load balancing across CPU cores
+- Zero-downtime reloads
+
+### Reverse Proxy Setup (Nginx)
+
+For production, run PROD-SYS behind Nginx:
+
+```nginx nginx.conf
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+```
+
+### SSL/TLS with Let's Encrypt
+
+```bash
+sudo certbot --nginx -d your-domain.com
+```
+
+### Docker Deployment
+
+Create a `Dockerfile`:
+
+```dockerfile Dockerfile
+FROM node:18-alpine
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci --only=production
+
+COPY . .
+
+EXPOSE 3000
+
+CMD ["node", "backend/server.js"]
+```
+
+Build and run:
+
+```bash
+docker build -t prod-sys .
+docker run -d -p 3000:3000 --env-file .env -v $(pwd)/backend/database:/app/backend/database prod-sys
+```
+
+<Warning>
+**Volume Mounting**: Always mount the database directory as a volume to persist data across container restarts.
+</Warning>
+
+## Troubleshooting
+
+### Database Locked Errors
+
+If you see "database is locked" errors:
+
+1. Verify WAL mode is enabled:
+   ```bash
+   sqlite3 backend/database/mfcalidad.sqlite "PRAGMA journal_mode;"
+   ```
+   Should return `wal`.
+
+2. Check for stale lock files:
+   ```bash
+   rm backend/database/mfcalidad.sqlite-shm
+   rm backend/database/mfcalidad.sqlite-wal
+   ```
+
+3. Restart the server to reinitialize connections.
+
+### Port Already in Use
+
+If port 3000 is occupied:
+
+```bash
+# Find the process using port 3000
+lsof -i :3000
+
+# Change the port in .env
+PORT=3001
+```
+
+### Bootstrap Already Completed
+
+If you need to reset bootstrap:
+
+```sql
+sqlite3 backend/database/mfcalidad.sqlite "UPDATE system_config SET value = '0' WHERE key = 'bootstrap_completed';"
+```
+
+<Warning>
+Only reset bootstrap if absolutely necessary. This will allow creating a new admin account.
+</Warning>
+
+### Permission Denied Errors
+
+Ensure the database directory is writable:
+
+```bash
+chmod 755 backend/database
+chmod 644 backend/database/mfcalidad.sqlite
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Get started with your first production order
+  </Card>
+  <Card title="Configuration" icon="gear" href="/admin/configuration">
+    Customize system settings
+  </Card>
+  <Card title="User Management" icon="users" href="/admin/user-management">
+    Set up users and roles
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/auth/login">
+    Integrate with external systems
+  </Card>
+</CardGroup>

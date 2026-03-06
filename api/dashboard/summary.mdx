@@ -1,0 +1,272 @@
+---
+title: 'Get Dashboard Summary'
+api: 'GET /api/dashboard/summary'
+description: 'Retrieve comprehensive dashboard metrics including active production orders, execution lines, work records, incidents, and recent activity'
+---
+
+Provides a high-level overview of the production system status with key performance indicators and recent activity. This endpoint aggregates data from multiple domains to give operators and managers a comprehensive view of current operations.
+
+## Response
+
+<ResponseField name="ordenesActivas" type="integer" required>
+  Number of production orders currently in active states (Liberada, En producción, or Pausada)
+</ResponseField>
+
+<ResponseField name="lineasEjecucion" type="integer" required>
+  Count of active execution lines currently running
+</ResponseField>
+
+<ResponseField name="registrosAbiertos" type="integer" required>
+  Number of completed work records in the system
+</ResponseField>
+
+<ResponseField name="incidentesActivos" type="integer" required>
+  Count of incidents currently in open state
+</ResponseField>
+
+<ResponseField name="produccionDia" type="number" required>
+  Total production quantity for the current day (sum of cantidad_producida from today's work records)
+</ResponseField>
+
+<ResponseField name="recentOrders" type="array" required>
+  Array of the 5 most recent active production orders
+  
+  <Expandable title="Order Object">
+    <ResponseField name="id" type="integer" required>
+      Unique production order identifier
+    </ResponseField>
+    
+    <ResponseField name="codigo_orden" type="string" required>
+      Production order code (unique identifier)
+    </ResponseField>
+    
+    <ResponseField name="producto" type="string" required>
+      Product name or description
+    </ResponseField>
+    
+    <ResponseField name="cantidad_objetivo" type="number" required>
+      Target production quantity
+    </ResponseField>
+    
+    <ResponseField name="unidad" type="string" required>
+      Unit of measurement (e.g., "Unidades", "kg", "metros")
+    </ResponseField>
+    
+    <ResponseField name="fecha_planificada" type="string" required>
+      Planned production date (ISO 8601 format)
+    </ResponseField>
+    
+    <ResponseField name="prioridad" type="string" required>
+      Priority level: "Alta", "Media", or "Baja"
+    </ResponseField>
+    
+    <ResponseField name="observaciones" type="string">
+      Additional notes or observations
+    </ResponseField>
+    
+    <ResponseField name="estado" type="string" required>
+      Current order status: "Creada", "Liberada", "En producción", "Pausada", "Cerrada", or "Cancelada"
+    </ResponseField>
+    
+    <ResponseField name="fecha_creacion" type="string" required>
+      Order creation date (ISO 8601 format)
+    </ResponseField>
+    
+    <ResponseField name="especificaciones" type="string">
+      JSON string containing product specifications and technical requirements
+    </ResponseField>
+    
+    <ResponseField name="motivo_cierre" type="string">
+      Reason for closing the order (if applicable)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="criticalIncidents" type="array" required>
+  Array of the 5 most recent high-severity open incidents
+  
+  <Expandable title="Incident Object">
+    <ResponseField name="id" type="integer" required>
+      Unique incident identifier
+    </ResponseField>
+    
+    <ResponseField name="titulo" type="string" required>
+      Brief incident title
+    </ResponseField>
+    
+    <ResponseField name="descripcion" type="string">
+      Detailed incident description
+    </ResponseField>
+    
+    <ResponseField name="severidad" type="string" required>
+      Incident severity level: "baja", "media", or "alta"
+    </ResponseField>
+    
+    <ResponseField name="estado" type="string" required>
+      Current incident status: "abierto" or "cerrado"
+    </ResponseField>
+    
+    <ResponseField name="linea_ejecucion_id" type="integer">
+      ID of the execution line where the incident occurred
+    </ResponseField>
+    
+    <ResponseField name="maquina_id" type="integer">
+      ID of the machine associated with the incident
+    </ResponseField>
+    
+    <ResponseField name="bitacora_id" type="integer">
+      ID of the shift log entry associated with the incident
+    </ResponseField>
+    
+    <ResponseField name="fecha_creacion" type="string" required>
+      Timestamp when the incident was reported (ISO 8601 format)
+    </ResponseField>
+    
+    <ResponseField name="fecha_cierre" type="string">
+      Timestamp when the incident was closed (ISO 8601 format)
+    </ResponseField>
+    
+    <ResponseField name="accion_correctiva" type="string">
+      Description of corrective actions taken
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<RequestExample>
+```bash cURL
+curl -X GET https://api.prod-sys.com/api/dashboard/summary \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```javascript JavaScript
+const response = await fetch('https://api.prod-sys.com/api/dashboard/summary', {
+  headers: {
+    'Authorization': 'Bearer YOUR_TOKEN'
+  }
+});
+
+const summary = await response.json();
+console.log(`Active orders: ${summary.ordenesActivas}`);
+console.log(`Today's production: ${summary.produccionDia}`);
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    'https://api.prod-sys.com/api/dashboard/summary',
+    headers={'Authorization': 'Bearer YOUR_TOKEN'}
+)
+
+summary = response.json()
+print(f"Active orders: {summary['ordenesActivas']}")
+print(f"Today's production: {summary['produccionDia']}")
+```
+</RequestExample>
+
+<ResponseExample>
+```json Response
+{
+  "ordenesActivas": 12,
+  "lineasEjecucion": 8,
+  "registrosAbiertos": 47,
+  "incidentesActivos": 3,
+  "produccionDia": 15650.5,
+  "recentOrders": [
+    {
+      "id": 1023,
+      "codigo_orden": "ORD-2026-1023",
+      "producto": "Saco de polipropileno 50kg",
+      "cantidad_objetivo": 10000,
+      "unidad": "Unidades",
+      "fecha_planificada": "2026-03-06",
+      "prioridad": "Alta",
+      "observaciones": "Pedido urgente - cliente prioritario",
+      "estado": "En producción",
+      "fecha_creacion": "2026-03-05",
+      "especificaciones": "{\"color\":\"blanco\",\"gramaje\":65,\"dimensiones\":\"60x90cm\"}",
+      "motivo_cierre": null
+    },
+    {
+      "id": 1022,
+      "codigo_orden": "ORD-2026-1022",
+      "producto": "Bobina laminada 1500m",
+      "cantidad_objetivo": 2500,
+      "unidad": "metros",
+      "fecha_planificada": "2026-03-06",
+      "prioridad": "Media",
+      "observaciones": "",
+      "estado": "Liberada",
+      "fecha_creacion": "2026-03-04",
+      "especificaciones": null,
+      "motivo_cierre": null
+    }
+  ],
+  "criticalIncidents": [
+    {
+      "id": 87,
+      "titulo": "Telar T-03 produce tejido con defectos",
+      "descripcion": "Se detectan irregularidades en el tejido cada 2 metros aproximadamente",
+      "severidad": "alta",
+      "estado": "abierto",
+      "linea_ejecucion_id": 45,
+      "maquina_id": 3,
+      "bitacora_id": 12,
+      "fecha_creacion": "2026-03-06T08:30:00.000Z",
+      "fecha_cierre": null,
+      "accion_correctiva": null
+    },
+    {
+      "id": 85,
+      "titulo": "Rotura de hilo en máquina de conversión",
+      "descripcion": "Hilo de costura se rompe frecuentemente durante producción",
+      "severidad": "alta",
+      "estado": "abierto",
+      "linea_ejecucion_id": 52,
+      "maquina_id": 18,
+      "bitacora_id": 12,
+      "fecha_creacion": "2026-03-06T07:15:00.000Z",
+      "fecha_cierre": null,
+      "accion_correctiva": null
+    }
+  ]
+}
+```
+</ResponseExample>
+
+## Use Cases
+
+### Real-time Monitoring
+This endpoint is ideal for dashboard displays that need to show current production status at a glance. It provides the essential KPIs that operations managers need to assess system health.
+
+### Shift Handover
+During shift transitions, supervisors can use this endpoint to quickly brief incoming staff on:
+- Current active production load
+- Any critical issues requiring immediate attention
+- Production progress for the day
+
+### Mobile Applications
+The compact response structure makes this endpoint perfect for mobile apps where network bandwidth is limited but comprehensive status is needed.
+
+## Data Sources
+
+This endpoint aggregates information from multiple database tables:
+- **orden_produccion**: Active orders count and recent order details
+- **lineas_ejecucion**: Active execution lines count
+- **registros_trabajo**: Completed work records count and daily production totals
+- **incidentes**: Active incidents count and critical incident details
+- **bitacora_turno**: Associated shift logs for context
+
+## Performance Considerations
+
+The summary endpoint is optimized for frequent polling:
+- All queries use indexed fields (estado, fecha_creacion)
+- Result sets are limited (5 recent orders, 5 critical incidents)
+- Aggregations use efficient COUNT and SUM operations
+- Response typically returns in under 100ms
+
+## Related Endpoints
+
+- [Get Production Order Dashboard](/api/dashboard/orden) - Detailed view of a specific order
+- [List Production Orders](/api/production/orders) - Full order management
+- [List Incidents](/api/production/incidents) - Complete incident tracking

@@ -1,0 +1,1125 @@
+---
+title: 'Group Management'
+description: 'Complete API reference for managing work groups, operational roles, and team assignments'
+---
+
+# Group Management API
+
+The Groups (Grupos) API provides endpoints for managing work groups, assigning operational roles to personnel, and controlling group membership. This module handles both operational groups (production floor teams organized by shifts) and administrative groups, with strict validation rules to prevent cross-type assignments.
+
+## Permissions
+
+All group endpoints require authentication and specific permissions:
+
+- **VIEW_STAFF** - Required for viewing groups and operational roles
+- **MANAGE_STAFF** - Required for creating groups, managing memberships, and assigning operational roles
+
+---
+
+## Get All Groups
+
+<CodeGroup>
+```bash cURL
+curl -X GET https://api.prod-sys.com/api/grupos \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```javascript JavaScript
+const response = await fetch('https://api.prod-sys.com/api/grupos', {
+  headers: {
+    'Authorization': 'Bearer YOUR_TOKEN'
+  }
+});
+const data = await response.json();
+```
+</CodeGroup>
+
+<RequestExample>
+```bash Request
+GET /api/grupos
+```
+</RequestExample>
+
+<ResponseExample>
+```json Response
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "nombre": "Grupo A - Turno 1",
+      "tipo": "operativo",
+      "turno_actual": "T1",
+      "activo": 1,
+      "created_at": "2024-01-10T08:00:00Z",
+      "updated_at": "2024-01-10T08:00:00Z"
+    },
+    {
+      "id": 2,
+      "nombre": "Grupo B - Turno 2",
+      "tipo": "operativo",
+      "turno_actual": "T2",
+      "activo": 1,
+      "created_at": "2024-01-10T08:00:00Z",
+      "updated_at": "2024-01-10T08:00:00Z"
+    },
+    {
+      "id": 5,
+      "nombre": "Administrativos",
+      "tipo": "administrativo",
+      "turno_actual": "T4",
+      "activo": 1,
+      "created_at": "2024-01-10T08:00:00Z",
+      "updated_at": "2024-01-10T08:00:00Z"
+    }
+  ]
+}
+```
+</ResponseExample>
+
+### Authorization
+**Required Permission:** `VIEW_STAFF`
+
+### Response Schema
+
+Returns a list of all active groups:
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if the request was successful
+</ResponseField>
+
+<ResponseField name="data" type="array" required>
+  Array of group objects
+  
+  <ResponseField name="id" type="integer">
+    Unique group identifier
+  </ResponseField>
+  
+  <ResponseField name="nombre" type="string">
+    Group name
+  </ResponseField>
+  
+  <ResponseField name="tipo" type="string">
+    Group type: `operativo` or `administrativo`
+  </ResponseField>
+  
+  <ResponseField name="turno_actual" type="string">
+    Current shift assignment (e.g., "T1", "T2", "T3", "T4"). Administrative groups are fixed at "T4".
+  </ResponseField>
+  
+  <ResponseField name="activo" type="integer">
+    Active status (1 = active, 0 = inactive)
+  </ResponseField>
+  
+  <ResponseField name="created_at" type="string">
+    Group creation timestamp
+  </ResponseField>
+  
+  <ResponseField name="updated_at" type="string">
+    Last update timestamp
+  </ResponseField>
+</ResponseField>
+
+---
+
+## Get Group Details
+
+<CodeGroup>
+```bash cURL
+curl -X GET https://api.prod-sys.com/api/grupos/1 \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```javascript JavaScript
+const response = await fetch('https://api.prod-sys.com/api/grupos/1', {
+  headers: {
+    'Authorization': 'Bearer YOUR_TOKEN'
+  }
+});
+const data = await response.json();
+```
+</CodeGroup>
+
+<RequestExample>
+```bash Request
+GET /api/grupos/:id
+```
+</RequestExample>
+
+<ResponseExample>
+```json Response
+{
+  "success": true,
+  "data": {
+    "id": 1,
+    "nombre": "Grupo A - Turno 1",
+    "tipo": "operativo",
+    "turno_actual": "T1",
+    "activo": 1,
+    "created_at": "2024-01-10T08:00:00Z",
+    "updated_at": "2024-03-15T14:30:00Z",
+    "integrantes": [
+      {
+        "id": 3,
+        "grupo_id": 1,
+        "persona_id": 15,
+        "nombre": "Juan",
+        "apellido": "Pérez",
+        "codigo_interno": "EMP015",
+        "rol_organizacional": "Operador de Máquina",
+        "rol_operativo": "Operador Especializado",
+        "fecha_desde": "2024-01-20T00:00:00Z",
+        "fecha_hasta": null,
+        "motivo": "Asignación operativa estándar",
+        "asignado_por": 2
+      },
+      {
+        "id": 7,
+        "grupo_id": 1,
+        "persona_id": 22,
+        "nombre": "Ana",
+        "apellido": "García",
+        "codigo_interno": "EMP022",
+        "rol_organizacional": "Técnico de Línea",
+        "rol_operativo": "Técnico",
+        "fecha_desde": "2024-02-01T00:00:00Z",
+        "fecha_hasta": null,
+        "motivo": "Integración al grupo operativo",
+        "asignado_por": 2
+      }
+    ],
+    "historial": [
+      {
+        "id": 2,
+        "grupo_id": 1,
+        "persona_id": 18,
+        "nombre": "Carlos",
+        "apellido": "Ramírez",
+        "fecha_desde": "2024-01-20T00:00:00Z",
+        "fecha_hasta": "2024-02-28T00:00:00Z",
+        "motivo": "Remoción por cambio de turno",
+        "asignado_por": 2
+      }
+    ]
+  }
+}
+```
+</ResponseExample>
+
+### Parameters
+
+<ParamField path="id" type="integer" required>
+  Group ID
+</ParamField>
+
+### Authorization
+**Required Permission:** `VIEW_STAFF`
+
+### Response Schema
+
+Returns comprehensive group details including current members and historical changes:
+
+<ResponseField name="success" type="boolean" required>
+  Request success indicator
+</ResponseField>
+
+<ResponseField name="data" type="object" required>
+  Detailed group information
+  
+  <ResponseField name="integrantes" type="array">
+    Current active group members
+    
+    <ResponseField name="id" type="integer">
+      Membership record ID
+    </ResponseField>
+    
+    <ResponseField name="persona_id" type="integer">
+      Personnel ID
+    </ResponseField>
+    
+    <ResponseField name="nombre" type="string">
+      First name
+    </ResponseField>
+    
+    <ResponseField name="apellido" type="string">
+      Last name
+    </ResponseField>
+    
+    <ResponseField name="codigo_interno" type="string">
+      Employee code
+    </ResponseField>
+    
+    <ResponseField name="rol_organizacional" type="string">
+      Organizational role title
+    </ResponseField>
+    
+    <ResponseField name="rol_operativo" type="string" nullable>
+      Current operational role name
+    </ResponseField>
+    
+    <ResponseField name="fecha_desde" type="string">
+      Membership start timestamp
+    </ResponseField>
+    
+    <ResponseField name="fecha_hasta" type="string" nullable>
+      Membership end timestamp (null for active members)
+    </ResponseField>
+    
+    <ResponseField name="motivo" type="string">
+      Reason for assignment
+    </ResponseField>
+    
+    <ResponseField name="asignado_por" type="integer">
+      ID of user who assigned this member
+    </ResponseField>
+  </ResponseField>
+  
+  <ResponseField name="historial" type="array">
+    Complete membership history including removed members
+  </ResponseField>
+</ResponseField>
+
+---
+
+## Add Group Member
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.prod-sys.com/api/grupos/1/integrantes \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "personaId": 25,
+    "motivo": "Integración al grupo operativo por necesidad de producción",
+    "es_correccion": false
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('https://api.prod-sys.com/api/grupos/1/integrantes', {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Bearer YOUR_TOKEN',
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    personaId: 25,
+    motivo: 'Integración al grupo operativo por necesidad de producción',
+    es_correccion: false
+  })
+});
+const data = await response.json();
+```
+</CodeGroup>
+
+<RequestExample>
+```json Request Body
+{
+  "personaId": 25,
+  "motivo": "Integración al grupo operativo por necesidad de producción",
+  "es_correccion": false
+}
+```
+</RequestExample>
+
+<ResponseExample>
+```json Response
+{
+  "success": true,
+  "data": {
+    "message": "Integrante añadido con éxito"
+  }
+}
+```
+</ResponseExample>
+
+### Parameters
+
+<ParamField path="id" type="integer" required>
+  Group ID
+</ParamField>
+
+### Authorization
+**Required Permission:** `MANAGE_STAFF`
+
+### Request Body
+
+<ParamField body="personaId" type="integer" required>
+  Personnel ID to add to the group
+</ParamField>
+
+<ParamField body="motivo" type="string" optional>
+  Reason for adding the member. Defaults to "Asignación operativa estándar" if not provided.
+</ParamField>
+
+<ParamField body="es_correccion" type="boolean" optional default="false">
+  Mark this assignment as a correction. If true, "[CORRECCIÓN]" prefix is added to the audit log.
+</ParamField>
+
+### Business Logic
+
+#### Validation Rules
+
+1. **Group Existence**: Group must exist in the system
+2. **Personnel Existence**: Person must exist in the system
+3. **Terminal State Protection**: Cannot add personnel with `estado_laboral = "Baja"`
+4. **Type Segregation**:
+   - Personnel from "Administración" area can **only** join `administrativo` groups
+   - Personnel from other areas (e.g., "Producción") can **only** join `operativo` groups
+   - Violation returns error: "Un colaborador administrativo no puede pertenecer a un grupo operativo" or vice versa
+5. **Duplicate Prevention**: Personnel cannot be added if they're already an active member
+6. **Transaction Safety**: All operations run within a database transaction
+7. **Audit Trail**: Logged with action `GRUPO_ADD_INTEGRANTE` including member details and group info
+
+### Error Responses
+
+<CodeGroup>
+```json Group Not Found
+{
+  "success": false,
+  "error": "Grupo no encontrado"
+}
+```
+
+```json Personnel Not Found
+{
+  "success": false,
+  "error": "Persona no encontrada"
+}
+```
+
+```json Terminal State
+{
+  "success": false,
+  "error": "No se puede asignar a un colaborador dado de Baja"
+}
+```
+
+```json Type Mismatch
+{
+  "success": false,
+  "error": "Un colaborador administrativo no puede pertenecer a un grupo operativo"
+}
+```
+
+```json Already Member
+{
+  "success": false,
+  "error": "El colaborador ya pertenece a este grupo"
+}
+```
+</CodeGroup>
+
+---
+
+## Remove Group Member
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.prod-sys.com/api/grupos/1/integrantes/25/remove \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "motivo": "Remoción por rotación de turno",
+    "es_correccion": false
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('https://api.prod-sys.com/api/grupos/1/integrantes/25/remove', {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Bearer YOUR_TOKEN',
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    motivo: 'Remoción por rotación de turno',
+    es_correccion: false
+  })
+});
+const data = await response.json();
+```
+</CodeGroup>
+
+<RequestExample>
+```json Request Body
+{
+  "motivo": "Remoción por rotación de turno",
+  "es_correccion": false
+}
+```
+</RequestExample>
+
+<ResponseExample>
+```json Response
+{
+  "success": true,
+  "data": {
+    "message": "Integrante removido con éxito"
+  }
+}
+```
+</ResponseExample>
+
+### Parameters
+
+<ParamField path="id" type="integer" required>
+  Group ID
+</ParamField>
+
+<ParamField path="personaId" type="integer" required>
+  Personnel ID to remove from the group
+</ParamField>
+
+### Authorization
+**Required Permission:** `MANAGE_STAFF`
+
+### Request Body
+
+<ParamField body="motivo" type="string" optional>
+  Reason for removal. Defaults to "Remoción operativa estándar" if not provided.
+</ParamField>
+
+<ParamField body="es_correccion" type="boolean" optional default="false">
+  Mark this removal as a correction. If true, "[CORRECCIÓN]" prefix is added to the audit log.
+</ParamField>
+
+### Business Logic
+
+1. **Membership Validation**: Verifies that the person is currently an active member of the group
+2. **Soft Delete**: Sets `fecha_hasta = CURRENT_TIMESTAMP` rather than deleting the record
+3. **Historical Preservation**: Membership history is preserved for audit and reporting
+4. **Transaction Safety**: Runs within a database transaction
+5. **Audit Trail**: Logged with action `GRUPO_REMOVE_INTEGRANTE` including person and group details
+
+### Error Responses
+
+<CodeGroup>
+```json Group Not Found
+{
+  "success": false,
+  "error": "Grupo no encontrado"
+}
+```
+
+```json Not a Member
+{
+  "success": false,
+  "error": "El colaborador no pertenece a este grupo"
+}
+```
+</CodeGroup>
+
+---
+
+## Rotate Group Shift
+
+<CodeGroup>
+```bash cURL
+curl -X PUT https://api.prod-sys.com/api/grupos/1/turno \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "nuevoTurno": "T2"
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('https://api.prod-sys.com/api/grupos/1/turno', {
+  method: 'PUT',
+  headers: {
+    'Authorization': 'Bearer YOUR_TOKEN',
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    nuevoTurno: 'T2'
+  })
+});
+const data = await response.json();
+```
+</CodeGroup>
+
+<RequestExample>
+```json Request Body
+{
+  "nuevoTurno": "T2"
+}
+```
+</RequestExample>
+
+<ResponseExample>
+```json Response
+{
+  "success": true,
+  "data": {
+    "message": "Turno actualizado con éxito"
+  }
+}
+```
+</ResponseExample>
+
+### Parameters
+
+<ParamField path="id" type="integer" required>
+  Group ID
+</ParamField>
+
+### Authorization
+**Required Permission:** `MANAGE_STAFF`
+
+### Request Body
+
+<ParamField body="nuevoTurno" type="string" required>
+  New shift identifier (e.g., "T1", "T2", "T3")
+</ParamField>
+
+### Business Logic
+
+1. **Group Validation**: Group must exist
+2. **Type Restriction**: Administrative groups (`tipo = "administrativo"`) have a fixed shift ("T4") and **cannot** be rotated
+   - Returns error: "El turno del grupo administrativo es fijo (T4)"
+3. **Transaction Safety**: Runs within a database transaction
+4. **Audit Trail**: Logged with action `GRUPO_ROTAR_TURNO` showing previous and new shift values
+5. **Timestamp Update**: The `updated_at` field is automatically updated
+
+<Info>
+  Shift rotation is typically used for operational groups that follow rotating shift schedules (e.g., weekly rotation between T1, T2, and T3).
+</Info>
+
+### Error Responses
+
+<CodeGroup>
+```json Group Not Found
+{
+  "success": false,
+  "error": "Grupo no encontrado"
+}
+```
+
+```json Administrative Group
+{
+  "success": false,
+  "error": "El turno del grupo administrativo es fijo (T4)"
+}
+```
+</CodeGroup>
+
+---
+
+## Get Operational Roles
+
+<CodeGroup>
+```bash cURL
+curl -X GET https://api.prod-sys.com/api/grupos/roles-operativos \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```javascript JavaScript
+const response = await fetch('https://api.prod-sys.com/api/grupos/roles-operativos', {
+  headers: {
+    'Authorization': 'Bearer YOUR_TOKEN'
+  }
+});
+const data = await response.json();
+```
+</CodeGroup>
+
+<RequestExample>
+```bash Request
+GET /api/grupos/roles-operativos
+```
+</RequestExample>
+
+<ResponseExample>
+```json Response
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "nombre": "Auxiliar",
+      "descripcion": "Personal de apoyo operativo",
+      "activo": 1
+    },
+    {
+      "id": 2,
+      "nombre": "Operador Especializado",
+      "descripcion": "Operador certificado en procesos específicos",
+      "activo": 1
+    },
+    {
+      "id": 3,
+      "nombre": "Técnico",
+      "descripcion": "Técnico de línea con competencias avanzadas",
+      "activo": 1
+    },
+    {
+      "id": 4,
+      "nombre": "Líder de Línea",
+      "descripcion": "Responsable de coordinar la línea de producción",
+      "activo": 1
+    }
+  ]
+}
+```
+</ResponseExample>
+
+### Authorization
+**Required Permission:** `VIEW_STAFF`
+
+### Response Schema
+
+Returns the catalog of operational roles:
+
+<ResponseField name="success" type="boolean" required>
+  Request success indicator
+</ResponseField>
+
+<ResponseField name="data" type="array" required>
+  List of active operational roles
+  
+  <ResponseField name="id" type="integer">
+    Operational role ID
+  </ResponseField>
+  
+  <ResponseField name="nombre" type="string">
+    Role name
+  </ResponseField>
+  
+  <ResponseField name="descripcion" type="string">
+    Role description
+  </ResponseField>
+  
+  <ResponseField name="activo" type="integer">
+    Active status (1 = active, 0 = inactive)
+  </ResponseField>
+</ResponseField>
+
+### Usage
+
+This endpoint provides the operational role catalog used for:
+- Populating dropdown menus when assigning operational roles
+- Validating rol_operativo_id in assignment operations
+- Displaying operational role capabilities and responsibilities
+
+---
+
+## Assign Operational Role
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.prod-sys.com/api/grupos/persona/15/rol-operativo \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rolOperativoId": 3,
+    "motivo": "Promoción a técnico por certificación completada",
+    "es_correccion": false
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('https://api.prod-sys.com/api/grupos/persona/15/rol-operativo', {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Bearer YOUR_TOKEN',
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    rolOperativoId: 3,
+    motivo: 'Promoción a técnico por certificación completada',
+    es_correccion: false
+  })
+});
+const data = await response.json();
+```
+</CodeGroup>
+
+<RequestExample>
+```json Request Body
+{
+  "rolOperativoId": 3,
+  "motivo": "Promoción a técnico por certificación completada",
+  "es_correccion": false
+}
+```
+</RequestExample>
+
+<ResponseExample>
+```json Response
+{
+  "success": true,
+  "data": {
+    "message": "Rol operativo asignado con éxito"
+  }
+}
+```
+</ResponseExample>
+
+### Parameters
+
+<ParamField path="personaId" type="integer" required>
+  Personnel ID
+</ParamField>
+
+### Authorization
+**Required Permission:** `MANAGE_STAFF`
+
+### Request Body
+
+<ParamField body="rolOperativoId" type="integer" required>
+  Operational role ID to assign. Must be a valid role from the roles_operativos catalog.
+</ParamField>
+
+<ParamField body="motivo" type="string" optional>
+  Reason for the role assignment. Defaults to "Cambio de rol operativo estándar" if not provided.
+</ParamField>
+
+<ParamField body="es_correccion" type="boolean" optional default="false">
+  Mark this assignment as a correction. If true, "[CORRECCIÓN]" prefix is added to the audit log.
+</ParamField>
+
+### Business Logic
+
+1. **Role Validation**: Validates that the operational role exists and is active
+2. **Historical Tracking**:
+   - Previous operational role assignment is closed by setting `fecha_hasta = CURRENT_TIMESTAMP`
+   - New role assignment is inserted with `fecha_hasta = NULL` (indicating current/active)
+3. **One Active Role**: Each person can have only one active operational role at a time
+4. **Transaction Safety**: Runs within a database transaction
+5. **Audit Trail**: Logged with action `ROL_OPERATIVO_CHANGE` including the new role name
+
+<Info>
+  **System Roles vs Operational Roles:**
+  
+  - **System Role** (assigned via `/api/personal/:id/rol`): Controls application permissions (e.g., Administrador, Supervisor, Operario)
+  - **Operational Role** (assigned via this endpoint): Defines production floor competencies (e.g., Auxiliar, Operador Especializado, Técnico)
+  
+  A person has one system role and one operational role, managed independently.
+</Info>
+
+### Error Responses
+
+<CodeGroup>
+```json Role Not Found
+{
+  "success": false,
+  "error": "Rol operativo no encontrado"
+}
+```
+</CodeGroup>
+
+---
+
+## Get Personnel Operational History
+
+<CodeGroup>
+```bash cURL
+curl -X GET https://api.prod-sys.com/api/grupos/persona/15/historial \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```javascript JavaScript
+const response = await fetch('https://api.prod-sys.com/api/grupos/persona/15/historial', {
+  headers: {
+    'Authorization': 'Bearer YOUR_TOKEN'
+  }
+});
+const data = await response.json();
+```
+</CodeGroup>
+
+<RequestExample>
+```bash Request
+GET /api/grupos/persona/:personaId/historial
+```
+</RequestExample>
+
+<ResponseExample>
+```json Response
+{
+  "success": true,
+  "data": {
+    "historial_roles_operativos": [
+      {
+        "id": 12,
+        "persona_id": 15,
+        "rol_operativo_id": 3,
+        "rol_nombre": "Técnico",
+        "fecha_desde": "2024-03-01T00:00:00Z",
+        "fecha_hasta": null,
+        "motivo": "Promoción a técnico por certificación completada",
+        "asignado_por": 2
+      },
+      {
+        "id": 8,
+        "persona_id": 15,
+        "rol_operativo_id": 2,
+        "rol_nombre": "Operador Especializado",
+        "fecha_desde": "2024-01-15T00:00:00Z",
+        "fecha_hasta": "2024-02-29T23:59:59Z",
+        "motivo": "Asignación inicial de rol operativo",
+        "asignado_por": 2
+      },
+      {
+        "id": 3,
+        "persona_id": 15,
+        "rol_operativo_id": 1,
+        "rol_nombre": "Auxiliar",
+        "fecha_desde": "2024-01-01T00:00:00Z",
+        "fecha_hasta": "2024-01-14T23:59:59Z",
+        "motivo": "Rol inicial de ingreso",
+        "asignado_por": 2
+      }
+    ]
+  }
+}
+```
+</ResponseExample>
+
+### Parameters
+
+<ParamField path="personaId" type="integer" required>
+  Personnel ID
+</ParamField>
+
+### Authorization
+**Required Permission:** `VIEW_STAFF`
+
+### Response Schema
+
+Returns the complete operational role history for a person:
+
+<ResponseField name="success" type="boolean" required>
+  Request success indicator
+</ResponseField>
+
+<ResponseField name="data" type="object" required>
+  <ResponseField name="historial_roles_operativos" type="array">
+    Ordered list of operational role assignments (most recent first)
+    
+    <ResponseField name="id" type="integer">
+      Assignment record ID
+    </ResponseField>
+    
+    <ResponseField name="persona_id" type="integer">
+      Personnel ID
+    </ResponseField>
+    
+    <ResponseField name="rol_operativo_id" type="integer">
+      Operational role ID
+    </ResponseField>
+    
+    <ResponseField name="rol_nombre" type="string">
+      Operational role name
+    </ResponseField>
+    
+    <ResponseField name="fecha_desde" type="string">
+      Role start timestamp
+    </ResponseField>
+    
+    <ResponseField name="fecha_hasta" type="string" nullable>
+      Role end timestamp (null for current active role)
+    </ResponseField>
+    
+    <ResponseField name="motivo" type="string">
+      Reason for the assignment
+    </ResponseField>
+    
+    <ResponseField name="asignado_por" type="integer">
+      ID of user who made the assignment
+    </ResponseField>
+  </ResponseField>
+</ResponseField>
+
+### Usage
+
+This endpoint is useful for:
+- Tracking personnel career progression
+- Auditing role changes
+- Generating competency reports
+- Identifying training and development paths
+
+---
+
+## Data Models
+
+### Group Entity
+
+Stored in the `grupos` table:
+
+```sql
+CREATE TABLE grupos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  nombre TEXT NOT NULL,
+  tipo TEXT NOT NULL CHECK(tipo IN ('operativo', 'administrativo')),
+  turno_actual TEXT NOT NULL,
+  activo INTEGER DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### Group Membership Entity
+
+Stored in the `grupo_integrantes` table:
+
+```sql
+CREATE TABLE grupo_integrantes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  grupo_id INTEGER NOT NULL,
+  persona_id INTEGER NOT NULL,
+  fecha_desde DATETIME DEFAULT CURRENT_TIMESTAMP,
+  fecha_hasta DATETIME,
+  motivo TEXT,
+  asignado_por INTEGER,
+  FOREIGN KEY (grupo_id) REFERENCES grupos(id),
+  FOREIGN KEY (persona_id) REFERENCES personas(id)
+);
+```
+
+### Operational Role Assignment Entity
+
+Stored in the `persona_roles_operativos` table:
+
+```sql
+CREATE TABLE persona_roles_operativos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  persona_id INTEGER NOT NULL,
+  rol_operativo_id INTEGER NOT NULL,
+  fecha_desde DATETIME DEFAULT CURRENT_TIMESTAMP,
+  fecha_hasta DATETIME,
+  motivo TEXT,
+  asignado_por INTEGER,
+  FOREIGN KEY (persona_id) REFERENCES personas(id),
+  FOREIGN KEY (rol_operativo_id) REFERENCES roles_operativos(id)
+);
+```
+
+### Operational Role Catalog
+
+Stored in the `roles_operativos` table:
+
+```sql
+CREATE TABLE roles_operativos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  nombre TEXT UNIQUE NOT NULL,
+  descripcion TEXT,
+  activo INTEGER DEFAULT 1
+);
+```
+
+---
+
+## Business Rules Summary
+
+### Group Type Segregation
+
+1. **Operational Groups** (`tipo = "operativo"`):
+   - Only for personnel from "Producción" and similar operational areas
+   - Subject to shift rotation
+   - Organized by production schedules
+
+2. **Administrative Groups** (`tipo = "administrativo"`):
+   - Only for personnel from "Administración" area
+   - Fixed shift (T4 - typically administrative hours)
+   - Cannot be rotated
+
+### State Validation
+
+- Personnel with `estado_laboral = "Baja"` (terminated) cannot be added to groups
+- All group operations respect terminal state protection
+
+### Historical Integrity
+
+- Group memberships are soft-deleted (fecha_hasta is set, not deleted)
+- Operational role assignments maintain complete history
+- All changes are audited with reasons and timestamps
+
+### Audit Compliance
+
+- All mutations require a `motivo` (reason)
+- Corrections are explicitly marked with `es_correccion` flag
+- Audit logs include before/after states for all changes
+
+---
+
+## Best Practices
+
+### Type Safety
+
+1. **Validate area before assignment**: Check personnel area before attempting to add to a group
+
+```javascript
+const person = await fetch(`/api/personal/${personaId}`).then(r => r.json());
+const group = await fetch(`/api/grupos/${grupoId}`).then(r => r.json());
+
+if (person.data.area_nombre === 'Administración' && group.data.tipo !== 'administrativo') {
+  alert('Cannot assign administrative personnel to operational group');
+  return;
+}
+```
+
+2. **Respect shift constraints**: Don't attempt to rotate administrative group shifts
+
+### Historical Queries
+
+1. **Current vs Historical**: Use `fecha_hasta IS NULL` to filter for current/active records:
+
+```sql
+-- Current group members only
+SELECT * FROM grupo_integrantes 
+WHERE grupo_id = ? AND fecha_hasta IS NULL;
+
+-- Complete history
+SELECT * FROM grupo_integrantes 
+WHERE grupo_id = ? 
+ORDER BY fecha_desde DESC;
+```
+
+2. **Role progression tracking**: Query `persona_roles_operativos` ordered by `fecha_desde DESC` to see career progression
+
+### Performance
+
+1. **Cache operational roles**: The roles catalog is relatively static. Cache it client-side.
+
+2. **Batch member additions**: If adding multiple members to a group, make parallel requests:
+
+```javascript
+const memberIds = [15, 22, 28, 31];
+const promises = memberIds.map(id => 
+  fetch(`/api/grupos/${grupoId}/integrantes`, {
+    method: 'POST',
+    body: JSON.stringify({ personaId: id, motivo: 'Batch assignment' })
+  })
+);
+await Promise.all(promises);
+```
+
+### Error Handling
+
+```javascript
+async function addGroupMember(grupoId, personaId, motivo) {
+  try {
+    const response = await fetch(`/api/grupos/${grupoId}/integrantes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ personaId, motivo })
+    });
+    
+    const result = await response.json();
+    
+    if (!result.success) {
+      // Business logic error (e.g., type mismatch, already member)
+      console.error('Assignment failed:', result.error);
+      return null;
+    }
+    
+    return result.data;
+  } catch (error) {
+    // Network or server error
+    console.error('Request failed:', error);
+    throw error;
+  }
+}
+```

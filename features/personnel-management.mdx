@@ -1,0 +1,760 @@
+---
+title: 'Personnel Management'
+description: 'Manage workers, operational assignments, work groups, and shift scheduling'
+icon: 'users'
+---
+
+PROD-SYS provides comprehensive personnel management to track workers, assign them to processes and machines, organize shift groups, and enforce operational staffing requirements.
+
+## Key Capabilities
+
+<CardGroup cols={2}>
+  <Card title="Personnel Registry" icon="address-card">
+    Maintain complete employee records with organizational roles, areas, contact info, and labor status.
+  </Card>
+  <Card title="Operational Roles" icon="user-gear">
+    Assign specialized operational roles (Operario, Auxiliar, Ayudante) with temporal tracking.
+  </Card>
+  <Card title="Work Assignments" icon="calendar-days">
+    Assign personnel to specific processes, machines, and shifts (permanent or temporary).
+  </Card>
+  <Card title="Shift Groups" icon="users-gear">
+    Organize workers into rotating shift groups (Grupo A, Grupo B) with automatic shift scheduling.
+  </Card>
+</CardGroup>
+
+---
+
+## Personnel Registry (Personas)
+
+### Data Model
+
+All employees are registered in the `personas` table:
+
+**Personnel Schema**:
+```sql
+CREATE TABLE personas (
+  id INTEGER PRIMARY KEY,
+  nombre TEXT NOT NULL,
+  apellido TEXT NOT NULL,
+  codigo_interno TEXT UNIQUE NOT NULL,    -- Employee ID/badge number
+  area_id INTEGER NOT NULL,               -- FK to areas table
+  email TEXT,
+  telefono TEXT,
+  fecha_ingreso TEXT,                     -- Hire date
+  rol_organizacional TEXT,                -- Job title (e.g., "Operador de Extrusión")
+  estado_laboral TEXT DEFAULT 'Activo',  -- Activo, Licencia, Baja
+  ausencia_desde TEXT,
+  ausencia_hasta TEXT,
+  tipo_ausencia TEXT,                     -- Vacaciones, Enfermedad, Licencia
+  motivo_ausencia TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  created_by TEXT,
+  updated_at TEXT,
+  updated_by TEXT,
+  motivo_cambio TEXT
+);
+```
+
+**Labor Status**:
+- **Activo**: Currently working
+- **Licencia**: On leave (with absence dates and reason)
+- **Baja**: Terminated
+
+**Source Reference**: `backend/domains/personal/personal.repository.js`
+
+### Creating Personnel Records
+
+**UI Flow**:
+1. Navigate to **Personnel → All Personnel**
+2. Click **Add Employee**
+3. Enter employee details:
+   - **Nombre / Apellido**: Full name
+   - **Código Interno**: Employee badge number
+   - **Área**: Select department (e.g., "Producción", "Calidad")
+   - **Email / Teléfono**: Contact information
+   - **Fecha de Ingreso**: Hire date
+   - **Rol Organizacional**: Job title
+4. Save personnel record
+
+**API Endpoint**: `POST /api/personnel/personal`
+
+**Request Body**:
+```json
+{
+  "nombre": "Juan",
+  "apellido": "Pérez",
+  "codigo_interno": "EMP-001",
+  "area_id": 2,
+  "email": "juan.perez@example.com",
+  "telefono": "555-1234",
+  "fecha_ingreso": "2024-01-15",
+  "rol_organizacional": "Operador de Extrusión",
+  "created_by": "admin"
+}
+```
+
+**Repository Method** (from `personal.repository.js:35`):
+```javascript
+async createPersona(personaData, tx) {
+  const db = tx || this.db;
+  const sql = `
+    INSERT INTO personas (
+      nombre, apellido, codigo_interno, area_id, email, telefono,
+      fecha_ingreso, rol_organizacional, created_by
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `;
+  const result = await db.run(sql, [
+    personaData.nombre, personaData.apellido, personaData.codigo_interno,
+    personaData.area_id || null, personaData.email || null, 
+    personaData.telefono || null, personaData.fecha_ingreso || null, 
+    personaData.rol_organizacional, personaData.created_by
+  ]);
+  return result.lastID;
+}
+```
+
+**Source Reference**: `backend/domains/personal/personal.repository.js:35`
+
+---
+
+## User Accounts (Usuarios)
+
+### System Access
+
+Personnel can be granted system access by creating a user account:
+
+**User Schema**:
+```sql
+CREATE TABLE usuarios (
+  id INTEGER PRIMARY KEY,
+  persona_id INTEGER UNIQUE NOT NULL,     -- 1:1 with personas
+  username TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  rol_id INTEGER NOT NULL,                -- FK to roles (Admin, Supervisor, Operator)
+  estado_usuario TEXT DEFAULT 'Activo',   -- Activo, Inactivo
+  must_change_password INTEGER DEFAULT 1,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  created_by TEXT,
+  updated_at TEXT,
+  updated_by TEXT,
+  motivo_cambio TEXT,
+  FOREIGN KEY (persona_id) REFERENCES personas(id),
+  FOREIGN KEY (rol_id) REFERENCES roles(id)
+);
+```
+
+**System Roles**:
+- **Administrador**: Full system access
+- **Supervisor**: Manage operations, approve deviations
+- **Operario**: Record production and quality data
+- **Auxiliar**: Limited data entry
+- **Consulta**: Read-only access
+
+**Source Reference**: `backend/domains/personal/personal.repository.js:115`
+
+### Creating User Accounts
+
+**UI Flow**:
+1. Navigate to personnel detail page
+2. Click **Create User Account**
+3. Enter credentials:
+   - **Username**: Unique system username
+   - **Password**: Initial password (user must change on first login)
+   - **Role**: Select from dropdown
+4. System creates user account linked to persona
+
+**API Endpoint**: `POST /api/personnel/personal/:id/usuario`
+
+**Request Body**:
+```json
+{
+  "username": "jperez",
+  "password": "InitialPass123!",
+  "rol_id": 3,
+  "created_by": "admin",
+  "motivo_cambio": "Creación inicial de usuario"
+}
+```
+
+**Implementation** (from `personal.repository.js:115`):
+```javascript
+async createUser(userData, tx) {
+  const db = tx || this.db;
+  const sql = `
+    INSERT INTO usuarios (
+      persona_id, username, password_hash, rol_id, 
+      must_change_password, created_by, motivo_cambio
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `;
+  return await db.run(sql, [
+    userData.persona_id, userData.username, userData.password_hash,
+    userData.rol_id, userData.must_change_password ? 1 : 0, 
+    userData.created_by, userData.motivo_cambio || 'Creación inicial'
+  ]);
+}
+```
+
+**Password Security**:
+- Passwords are hashed using bcrypt before storage
+- Initial passwords require change on first login (`must_change_password = 1`)
+- Password reset creates audit trail via `motivo_cambio`
+
+**Source Reference**: `backend/domains/personal/personal.repository.js:115`
+
+---
+
+## Operational Roles (Roles Operativos)
+
+### Role Assignment
+
+Personnel are assigned **operational roles** that define their shop floor responsibilities:
+
+**Operational Roles**:
+- **Operario**: Primary machine operator
+- **Auxiliar**: Assistant operator
+- **Ayudante**: Helper/trainee
+- **Inspector**: Quality inspector
+- **Preparador**: Machine setup technician
+
+**Operational Role Schema**:
+```sql
+CREATE TABLE roles_operativos (
+  id INTEGER PRIMARY KEY,
+  nombre TEXT UNIQUE NOT NULL,
+  descripcion TEXT,
+  activo INTEGER DEFAULT 1
+);
+```
+
+**Assignment Schema** (`persona_roles_operativos`):
+```sql
+CREATE TABLE persona_roles_operativos (
+  id INTEGER PRIMARY KEY,
+  persona_id INTEGER NOT NULL,
+  rol_operativo_id INTEGER NOT NULL,
+  motivo TEXT,                          -- Reason for assignment
+  asignado_por TEXT,                    -- Who assigned the role
+  fecha_desde TEXT DEFAULT CURRENT_TIMESTAMP,
+  fecha_hasta TEXT,                     -- NULL = currently active
+  FOREIGN KEY (persona_id) REFERENCES personas(id),
+  FOREIGN KEY (rol_operativo_id) REFERENCES roles_operativos(id)
+);
+```
+
+**Temporal Tracking**:
+- `fecha_desde`: Assignment start date
+- `fecha_hasta`: Assignment end date (NULL for active assignments)
+- Historical assignments preserved for auditing
+
+**Source Reference**: `backend/domains/grupos/grupos.repository.js:85`
+
+### Assigning Operational Roles
+
+**UI Flow**:
+1. Navigate to personnel detail page → **Operational Role** section
+2. Click **Assign Role**
+3. Select role from dropdown
+4. Enter assignment reason (e.g., "Promoción a operario", "Capacitación completada")
+5. System closes previous role assignment and creates new one
+
+**API Endpoint**: `POST /api/personnel/personal/:id/rol-operativo`
+
+**Request Body**:
+```json
+{
+  "rol_operativo_id": 1,
+  "motivo": "Promoción tras 6 meses como Auxiliar",
+  "asignado_por": "supervisor1"
+}
+```
+
+**Implementation** (from `grupos.repository.js:85`):
+```javascript
+async assignRolOperativo(data) {
+  // Close current role
+  await this.db.run(
+    'UPDATE persona_roles_operativos SET fecha_hasta = CURRENT_TIMESTAMP WHERE persona_id = ? AND fecha_hasta IS NULL',
+    [data.persona_id]
+  );
+  
+  // Add new role
+  const sql = `
+    INSERT INTO persona_roles_operativos 
+    (persona_id, rol_operativo_id, motivo, asignado_por)
+    VALUES (?, ?, ?, ?)
+  `;
+  return await this.db.run(sql, [
+    data.persona_id, data.rol_operativo_id, 
+    data.motivo, data.asignado_por
+  ]);
+}
+```
+
+**Role History Query** (from `grupos.repository.js:74`):
+```javascript
+async getPersonaRolesOperativos(personaId) {
+  const sql = `
+    SELECT pro.*, ro.nombre as rol_nombre
+    FROM persona_roles_operativos pro
+    JOIN roles_operativos ro ON pro.rol_operativo_id = ro.id
+    WHERE pro.persona_id = ?
+    ORDER BY pro.fecha_desde DESC
+  `;
+  return await this.db.query(sql, [personaId]);
+}
+```
+
+**Source Reference**: `backend/domains/grupos/grupos.repository.js:85`
+
+---
+
+## Work Assignments (Asignaciones Operativas)
+
+### Process Assignments
+
+Personnel are assigned to specific processes, machines, and shifts:
+
+**Assignment Schema**:
+```sql
+CREATE TABLE asignaciones_operativas (
+  id INTEGER PRIMARY KEY,
+  persona_id INTEGER NOT NULL,
+  proceso_id INTEGER NOT NULL,
+  maquina_id INTEGER,                   -- NULL = any machine in process
+  turno TEXT NOT NULL,                  -- 'Día', 'Noche', or 'Ambos'
+  permanente INTEGER DEFAULT 0,         -- 1 = permanent, 0 = temporary
+  fecha_inicio TEXT DEFAULT CURRENT_TIMESTAMP,
+  fecha_fin TEXT,                       -- NULL = currently active
+  created_by TEXT,
+  FOREIGN KEY (persona_id) REFERENCES personas(id)
+);
+```
+
+**Assignment Types**:
+- **Permanent** (`permanente = 1`): Long-term assignment to a process/machine
+- **Temporary** (`permanente = 0`): Short-term assignment with defined end date
+
+**Source Reference**: `backend/domains/personal/personal.repository.js:230`
+
+### Creating Assignments
+
+**UI Flow**:
+1. Navigate to **Operations → Assignments**
+2. Click **New Assignment**
+3. Select:
+   - **Employee**: From active personnel list
+   - **Process**: From ProcessRegistry (1-9)
+   - **Machine**: Optional (leave blank for any machine in process)
+   - **Shift**: Día, Noche, or Ambos
+   - **Permanent**: Checkbox
+4. Save assignment
+
+**API Endpoint**: `POST /api/personnel/personal/asignaciones`
+
+**Request Body**:
+```json
+{
+  "persona_id": 45,
+  "proceso_id": 1,
+  "maquina_id": 12,
+  "turno": "Día",
+  "permanente": true,
+  "created_by": "supervisor1"
+}
+```
+
+**Implementation** (from `personal.repository.js:230`):
+```javascript
+async assignOperation(assignmentData, tx) {
+  const db = tx || this.db;
+  const sql = `
+    INSERT INTO asignaciones_operativas (
+      persona_id, proceso_id, maquina_id, turno, permanente, created_by
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `;
+  return await db.run(sql, [
+    assignmentData.persona_id, assignmentData.proceso_id,
+    assignmentData.maquina_id, assignmentData.turno,
+    assignmentData.permanente ? 1 : 0, assignmentData.created_by
+  ]);
+}
+```
+
+**Source Reference**: `backend/domains/personal/personal.repository.js:230`
+
+### Assignment Validation
+
+During bitácora closure, the system validates that all active processes have assigned personnel:
+
+**Validation Logic** (from `bitacora.service.js:134`):
+```javascript
+async _validateProcesoPersonal(proceso, bitacora, registros, muestras) {
+  const status = await this.bitacoraRepository.getProcesoStatus(
+    bitacora.id, 
+    proceso.processId
+  );
+  const isOperativo = !(status && status.no_operativo);
+  const hasData = registros.length > 0 || muestras.length > 0;
+  
+  if (isOperativo && hasData) {
+    // Verificar personal asignado
+    const hasPersonnel = await this.bitacoraRepository.checkAssignmentsForProcess(
+      proceso.processId, 
+      bitacora.turno
+    );
+    if (!hasPersonnel) {
+      throw new ValidationError(
+        `No se puede cerrar el turno: El proceso '${proceso.nombre}' tiene actividad pero no cuenta con personal asignado para el turno ${bitacora.turno}.`
+      );
+    }
+  }
+}
+```
+
+**Enforcement**: Shift cannot be closed if an operational process with recorded data lacks assigned personnel.
+
+**Source Reference**: `backend/domains/production/bitacora.service.js:134`
+
+---
+
+## Shift Groups (Grupos)
+
+### Group Management
+
+Personnel are organized into shift groups that rotate between day and night shifts:
+
+**Group Schema**:
+```sql
+CREATE TABLE grupos (
+  id INTEGER PRIMARY KEY,
+  nombre TEXT UNIQUE NOT NULL,          -- e.g., "Grupo A", "Grupo B"
+  tipo TEXT,                            -- 'Rotativo', 'Fijo Día', 'Fijo Noche'
+  turno_actual TEXT,                    -- 'Día' or 'Noche'
+  activo INTEGER DEFAULT 1,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+```
+
+**Group Membership** (`grupo_integrantes`):
+```sql
+CREATE TABLE grupo_integrantes (
+  id INTEGER PRIMARY KEY,
+  grupo_id INTEGER NOT NULL,
+  persona_id INTEGER NOT NULL,
+  motivo TEXT,                          -- Reason for assignment
+  asignado_por TEXT,                    -- Who assigned them
+  fecha_desde TEXT DEFAULT CURRENT_TIMESTAMP,
+  fecha_hasta TEXT,                     -- NULL = currently active
+  FOREIGN KEY (grupo_id) REFERENCES grupos(id),
+  FOREIGN KEY (persona_id) REFERENCES personas(id)
+);
+```
+
+**Source Reference**: `backend/domains/grupos/grupos.repository.js`
+
+### Creating Groups
+
+**UI Flow**:
+1. Navigate to **Personnel → Groups**
+2. Click **Create Group**
+3. Enter group details:
+   - **Nombre**: e.g., "Grupo A"
+   - **Tipo**: Rotativo (default), Fijo Día, or Fijo Noche
+   - **Turno Actual**: Starting shift (Día or Noche)
+4. Save group
+
+**API Endpoint**: `POST /api/grupos`
+
+**Request Body**:
+```json
+{
+  "nombre": "Grupo A",
+  "tipo": "Rotativo",
+  "turno_actual": "Día"
+}
+```
+
+**Implementation** (from `grupos.repository.js:13`):
+```javascript
+async createGrupo(data) {
+  const sql = `
+    INSERT INTO grupos (nombre, tipo, turno_actual)
+    VALUES (?, ?, ?)
+  `;
+  const result = await this.db.run(sql, [
+    data.nombre, data.tipo, data.turno_actual
+  ]);
+  return result.lastID;
+}
+```
+
+**Source Reference**: `backend/domains/grupos/grupos.repository.js:13`
+
+### Adding Members
+
+**UI Flow**:
+1. Navigate to group detail page
+2. Click **Add Member**
+3. Select employee from dropdown
+4. Enter assignment reason
+5. System adds member to group
+
+**API Endpoint**: `POST /api/grupos/:id/integrantes`
+
+**Request Body**:
+```json
+{
+  "persona_id": 45,
+  "motivo": "Asignación a grupo rotativo tras capacitación",
+  "asignado_por": "supervisor1"
+}
+```
+
+**Implementation** (from `grupos.repository.js:53`):
+```javascript
+async addIntegrante(data) {
+  const sql = `
+    INSERT INTO grupo_integrantes (grupo_id, persona_id, motivo, asignado_por)
+    VALUES (?, ?, ?, ?)
+  `;
+  return await this.db.run(sql, [
+    data.grupo_id, data.persona_id, data.motivo, data.asignado_por
+  ]);
+}
+```
+
+**Source Reference**: `backend/domains/grupos/grupos.repository.js:53`
+
+### Shift Rotation
+
+Groups rotate shifts automatically:
+
+**Rotation Logic**:
+- **Rotativo** groups swap shifts weekly (configurable)
+- **Fijo Día** / **Fijo Noche** groups do not rotate
+
+**API Endpoint**: `PATCH /api/grupos/:id/turno`
+
+**Request Body**:
+```json
+{
+  "nuevoTurno": "Noche"
+}
+```
+
+**Implementation** (from `grupos.repository.js:99`):
+```javascript
+async updateTurnoGrupo(grupoId, nuevoTurno) {
+  const sql = `
+    UPDATE grupos 
+    SET turno_actual = ?, updated_at = CURRENT_TIMESTAMP 
+    WHERE id = ?
+  `;
+  return await this.db.run(sql, [nuevoTurno, grupoId]);
+}
+```
+
+**Typical Usage**: Supervisor runs shift rotation at the start of each week for all rotativo groups.
+
+**Source Reference**: `backend/domains/grupos/grupos.repository.js:99`
+
+---
+
+## Absence Management
+
+### Recording Absences
+
+When personnel are absent, their labor status is updated:
+
+**Absence Flow**:
+1. Navigate to personnel detail page
+2. Click **Record Absence**
+3. Enter absence details:
+   - **Tipo de Ausencia**: Vacaciones, Enfermedad, Licencia, Permiso
+   - **Fecha Desde / Fecha Hasta**: Absence period
+   - **Motivo**: Detailed reason
+4. System updates `estado_laboral = 'Licencia'` and records absence
+
+**Absence History** (`historial_ausencias`):
+```sql
+CREATE TABLE historial_ausencias (
+  id INTEGER PRIMARY KEY,
+  persona_id INTEGER NOT NULL,
+  estado_laboral TEXT NOT NULL,
+  tipo_ausencia TEXT,
+  ausencia_desde TEXT,
+  ausencia_hasta TEXT,
+  motivo_ausencia TEXT,
+  registrado_por TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (persona_id) REFERENCES personas(id)
+);
+```
+
+**Implementation** (from `personal.repository.js:129`):
+```javascript
+async saveHistorialAusencia(data, tx) {
+  const db = tx || this.db;
+  const sql = `
+    INSERT INTO historial_ausencias (
+      persona_id, estado_laboral, tipo_ausencia,
+      ausencia_desde, ausencia_hasta,
+      motivo_ausencia, registrado_por
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `;
+  return await db.run(sql, [
+    data.persona_id, data.estado_laboral,
+    data.tipo_ausencia, data.ausencia_desde,
+    data.ausencia_hasta, data.motivo_ausencia,
+    data.registrado_por
+  ]);
+}
+```
+
+**Source Reference**: `backend/domains/personal/personal.repository.js:129`
+
+### Returning from Absence
+
+**Flow**:
+1. Navigate to personnel detail page
+2. Click **Return from Absence**
+3. System updates `estado_laboral = 'Activo'` and clears absence fields
+4. Historical absence record preserved in `historial_ausencias`
+
+---
+
+## Integration with Planning
+
+### Personnel Planning
+
+The weekly planning system (`plan_detalle_personal`) references personnel assignments:
+
+**Planning Schema**:
+```sql
+CREATE TABLE plan_detalle_personal (
+  id INTEGER PRIMARY KEY,
+  plan_id INTEGER NOT NULL,
+  persona_id INTEGER NOT NULL,
+  proceso_id INTEGER NOT NULL,
+  maquina_id INTEGER,
+  turno TEXT NOT NULL,
+  dia_semana INTEGER NOT NULL,         -- 0=Sunday, 6=Saturday
+  rol_operativo_id INTEGER,
+  FOREIGN KEY (plan_id) REFERENCES plan_semanal(id),
+  FOREIGN KEY (persona_id) REFERENCES personas(id),
+  FOREIGN KEY (rol_operativo_id) REFERENCES roles_operativos(id)
+);
+```
+
+**Planning Workflow**:
+1. Supervisor creates weekly plan
+2. Assigns orders to processes/machines/shifts
+3. Assigns personnel to match order schedule
+4. System validates:
+   - Personnel have appropriate operational roles
+   - No double-booking (same person assigned to multiple processes in same shift)
+   - Availability (not on absence)
+
+**Query: Planned Personnel for Shift** (from `planning.repository.js:114`):
+```javascript
+async getPlanningForShift(anio, semana_iso, dia_semana, turno, proceso_id = null) {
+  const plan = await this.findPlanByWeek(anio, semana_iso);
+  if (!plan || plan.estado === 'BORRADOR') return null;
+  
+  let sqlP = `
+    SELECT pdp.*, p.nombre || ' ' || p.apellido as nombre_completo, 
+           ro.nombre as rol_nombre
+    FROM plan_detalle_personal pdp
+    JOIN personas p ON pdp.persona_id = p.id
+    LEFT JOIN roles_operativos ro ON pdp.rol_operativo_id = ro.id
+    WHERE pdp.plan_id = ? AND pdp.dia_semana = ? AND pdp.turno = ?
+  `;
+  let paramsP = [plan.id, dia_semana, turno];
+  if (proceso_id) {
+    sqlP += " AND pdp.proceso_id = ?";
+    paramsP.push(proceso_id);
+  }
+  const personal = await this.db.query(sqlP, paramsP);
+  
+  return { plan, personal };
+}
+```
+
+**Use Case**: When opening a bitácora, display planned personnel for that shift to operators.
+
+**Source Reference**: `backend/domains/production/planning.repository.js:114`
+
+---
+
+## Reporting & Analytics
+
+### Active Personnel Report
+
+**Query**:
+```sql
+SELECT 
+  p.codigo_interno,
+  p.nombre || ' ' || p.apellido as nombre_completo,
+  p.rol_organizacional,
+  a.nombre as area,
+  ro.nombre as rol_operativo,
+  p.estado_laboral
+FROM personas p
+JOIN areas a ON p.area_id = a.id
+LEFT JOIN persona_roles_operativos pro ON p.id = pro.persona_id AND pro.fecha_hasta IS NULL
+LEFT JOIN roles_operativos ro ON pro.rol_operativo_id = ro.id
+WHERE p.estado_laboral = 'Activo'
+ORDER BY a.nombre, p.apellido, p.nombre;
+```
+
+### Assignment Coverage Report
+
+**Query** (processes without assigned personnel):
+```sql
+SELECT 
+  proceso_id,
+  turno,
+  COUNT(DISTINCT persona_id) as personas_asignadas
+FROM asignaciones_operativas
+WHERE (fecha_fin IS NULL OR fecha_fin > CURRENT_TIMESTAMP)
+GROUP BY proceso_id, turno
+ORDER BY personas_asignadas ASC;
+```
+
+**Use Case**: Identify processes that lack sufficient personnel coverage
+
+### Absence Trend Analysis
+
+**Query** (absence rate by month):
+```sql
+SELECT 
+  strftime('%Y-%m', ausencia_desde) as mes,
+  tipo_ausencia,
+  COUNT(*) as cantidad,
+  AVG(julianday(ausencia_hasta) - julianday(ausencia_desde)) as dias_promedio
+FROM historial_ausencias
+WHERE ausencia_desde >= date('now', '-12 months')
+GROUP BY mes, tipo_ausencia
+ORDER BY mes DESC, cantidad DESC;
+```
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Production Management" icon="industry" href="/features/production-management">
+    See how personnel assignments enforce staffing requirements during shifts
+  </Card>
+  <Card title="Quality Control" icon="microscope" href="/features/quality-control">
+    Learn about inspector roles in quality validation
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/auth/login">
+    Explore personnel management API endpoints
+  </Card>
+  <Card title="Dashboard" icon="chart-line" href="/introduction">
+    View personnel metrics and assignment coverage
+  </Card>
+</CardGroup>

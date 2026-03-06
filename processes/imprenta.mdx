@@ -1,0 +1,524 @@
+---
+title: Imprenta (Printing)
+description: Flexographic printing process for applying customer designs onto laminated or natural polypropylene fabric
+---
+
+## Overview
+
+Imprenta (Process ID: 4) applies high-speed flexographic printing to polypropylene fabric, creating branded industrial bags with customer artwork. This process handles up to 8 colors (5 front + 3 back) and operates at 100 m/min line speed.
+
+### Process Characteristics
+
+- **Process Type**: Order-based production
+- **Production Unit**: impresiones (impressions/prints)
+- **Product**: Printed polypropylene fabric rolls with verified artwork
+- **Machines**: 1 printing line (IMP01)
+- **Order Pattern**: `4\d{6}` (e.g., 4000678)
+- **Production Target**: 15,000 impressions per shift
+- **Line Speed**: 100 m/min
+
+### What This Process Does
+
+The Imprenta process:
+- **Receives**: Fabric rolls from Telares or Laminado, inks, solvents, printing plates
+- **Transforms**: Neutral fabric rolls → Printed fabric rolls with customer design
+- **Delivers**: Printed rolls with verified color and registration for conversion
+- **Method**: Flexographic high-speed printing with multi-color capability
+
+## Production Flow
+
+### Upstream Dependencies
+
+Imprenta consumes fabric rolls from:
+- **Telares (Process 2)**: Natural fabric rolls
+  - Format: `R{3-digit}-T{2-digit}` (e.g., R047-T05)
+- **Laminado (Process 3)**: Laminated fabric rolls
+  - Format: `R{3-digit}-T{2-digit}-L{3-digit}` (e.g., R047-T05-L001)
+
+### Downstream Consumers
+
+Printed fabric feeds into:
+- **Conversión (Process 5)**: Bag conversion
+- **Conversión Sacos Vestidos (Process 9)**: Lined bag conversion
+
+### Production Tracking Method
+
+**Print Count Method** (`ImprentaContract.js:130-136`):
+
+```javascript
+reglasProduccion: {
+  metodo: 'conteo_impresiones',
+  descripcion: 'Production measured in impressions, not meters. Each impression = one bag with dimensions defined in order.',
+  unidad: 'impresiones',
+  registroPorRollo: true,
+  registroPorCambioDeOrden: true
+}
+```
+
+Each impression corresponds to one printed bag panel.
+
+## Data Structures
+
+### Key Tables
+
+#### registros_trabajo
+```javascript
+{
+  linea_ejecucion_id: FK,
+  bitacora_id: FK,
+  maquina_id: 3, // IMP01
+  cantidad_producida: total_impressions,
+  merma_kg: waste,
+  parametros: JSON {
+    impresiones_totales: sum from all rolls,
+    tipo_desperdicio: 'DESP-01' | 'DESP-02',
+    velocidad_linea: 100,
+    tension_sustrato: 45
+  }
+}
+```
+
+#### imprenta_consumo_rollo
+Roll consumption per shift:
+```javascript
+{
+  bitacora_id: FK,
+  maquina_id: 3,
+  orden_id: FK,
+  codigo_rollo: 'R047-T05-L001',
+  origen_proceso_id: 3, // Inferred: 2=Telares, 3=Laminado
+  metros_consumidos: decimal,
+  impresiones_producidas: integer,
+  lote_id: FK, // Generated per roll
+  registro_trabajo_id: FK
+}
+```
+
+#### imprenta_tintas
+Ink declaration per shift/order:
+```javascript
+{
+  bitacora_id: FK,
+  maquina_id: 3,
+  orden_id: FK,
+  posicion: 'frente' | 'dorso',
+  numero_color: 1-8,
+  codigo_pantone: text,
+  tipo: text,
+  marca: text,
+  lote: text
+}
+```
+
+Up to 8 colors: 5 front + 3 back (`ImprentaContract.js:147-156`).
+
+#### imprenta_calidad_muestras
+Quality samples per inspection:
+```javascript
+{
+  bitacora_id: FK,
+  maquina_id: 3,
+  orden_id: FK,
+  inspeccion_indice: 1-3, // 3 inspections per shift
+  parametro: 'ancho_tela' | 'viscosidad_tinta' | 'adherencia_tinta',
+  valor: decimal,
+  resultado: 'Cumple' | 'No cumple' | 'Pasa' | 'No pasa',
+  tinta_posicion: 'frente' | 'dorso',
+  tinta_numero_color: 1-8,
+  tinta_codigo_pantone: text
+}
+```
+
+### Lot Generation
+
+**Per-Roll Lot Creation** (`imprenta.service.js:129-149`):
+
+Each printed roll generates a lot:
+```javascript
+codigo_lote = `${codigo_rollo}-I${correlativo}`
+// Example: R047-T05-L001-I001
+```
+
+## Quality Parameters
+
+### Critical Parameters
+
+#### 1. Fabric Width (ancho_tela)
+- **Unit**: inches
+- **Nominal**: From order
+- **Tolerance**: Not explicitly defined in contract
+- **Sampling**: Per inspection (3 per shift)
+
+#### 2. Ink Viscosity (viscosidad_tinta)
+- **Unit**: seconds (Zahn Cup #2)
+- **Range**: 19-25 seconds
+- **Nominal**: 22 seconds
+- **Sampling**: Per ink, per inspection
+- **Method**: Zahn Cup #2 drain time measurement
+
+**Auto-calculation** (`imprenta.service.js:183-186`):
+```javascript
+if (m.parametro === 'viscosidad_tinta') {
+  finalResultado = (m.valor >= 19 && m.valor <= 25) ? 'Cumple' : 'No cumple';
+}
+```
+
+#### 3. Ink Adhesion (adherencia_tinta)
+- **Type**: Pass/Fail manual test
+- **Sampling**: Per ink, per inspection
+- **Method**: Manual adhesion test
+
+### Sampling Frequency (`ImprentaContract.js:111-120`)
+
+```javascript
+frecuenciaMuestreo: {
+  muestrasMinTurno: 3,
+  distribucion: [
+    { indice: 1, momento: 'inicio_turno' },
+    { indice: 2, momento: 'mitad_turno' },
+    { indice: 3, momento: 'casi_cierre_turno' }
+  ],
+  omisionRequiereMotivo: true,
+  permiteCopiarMuestraAnterior: false
+}
+```
+
+Each inspection must measure:
+- Fabric width
+- Viscosity for each active ink
+- Adhesion for each active ink
+
+## Business Logic
+
+### Roll Origin Detection (`imprenta.service.js:133`):
+
+```javascript
+const origen_proceso_id = rollo.codigo_rollo.includes('-L') ? 3 : 2;
+// If code contains '-L': from Laminado (3)
+// Otherwise: from Telares (2)
+```
+
+### Ink Declaration (`ImprentaContract.js:147-156`):
+
+```javascript
+reglasTintas: {
+  maximoColores: 8,
+  camposPorTinta: [
+    { nombre: 'posicion', opciones: ['frente', 'dorso'] },
+    { nombre: 'codigo_pantone', tipo: 'texto' },
+    { nombre: 'marca', tipo: 'texto libre' },
+    { nombre: 'lote', tipo: 'texto libre' }
+  ]
+}
+```
+
+### Waste Types (`ImprentaContract.js:158-166`):
+
+```javascript
+reglasDesperdicio: {
+  unidad: 'kg',
+  tipos: [
+    { id: 'DESP-01', nombre: 'Desperdicio por cuadre' },
+    { id: 'DESP-02', nombre: 'Desperdicio por defecto de entrada' }
+  ],
+  destinos: ['Peletizado', 'Descarte final'],
+  registroObligatorio: true
+}
+```
+
+### Validation Rules (`imprenta.service.js:52-88`):
+
+```javascript
+// 1. Order must exist and start with '4'
+if (!codigoOrden.startsWith('4')) {
+  throw new ValidationError(`La orden ${codigoOrden} no pertenece al proceso de Imprenta.`);
+}
+
+// 2. At least 1 roll if production > 0
+if (impresionesTotales > 0 && rollos.length === 0) {
+  throw new ValidationError('Debe declarar al menos un rollo cuando hay producción.');
+}
+
+// 3. Each roll must have positive meters and impressions
+for (const r of rollos) {
+  if (!r.metros_consumidos || r.metros_consumidos <= 0) {
+    throw new ValidationError(`El rollo ${r.codigo_rollo} debe tener metros consumidos > 0.`);
+  }
+  if (!r.impresiones_producidas || r.impresiones_producidas <= 0) {
+    throw new ValidationError(`El rollo ${r.codigo_rollo} debe tener impresiones producidas > 0.`);
+  }
+}
+
+// 4. Adhesion must be 'Pasa' or 'No pasa'
+for (const m of muestras) {
+  if (m.parametro === 'adherencia_tinta' && !['Pasa', 'No pasa'].includes(m.resultado)) {
+    throw new ValidationError('El resultado de adherencia debe ser "Pasa" o "No pasa".');
+  }
+}
+```
+
+## API Endpoints
+
+### GET `/api/imprenta/detalle/:maquinaId`
+
+Returns printing line status:
+
+**Response**:
+```javascript
+{
+  maquina: { id: 3, codigo: 'IMP01', nombre_visible: 'Imprenta 1' },
+  estado_proceso: 'Completo',
+  ultimo_registro: {
+    id: 92,
+    orden_id: 678,
+    codigo_orden: '4000678',
+    cantidad_producida: 15200,
+    merma_kg: 22.5,
+    parametros: '{ "impresiones_totales": 15200, "tipo_desperdicio": "DESP-01", ... }'
+  },
+  rollos_consumidos: [
+    {
+      codigo_rollo: 'R047-T05-L001',
+      origen_proceso_id: 3,
+      metros_consumidos: 1830,
+      impresiones_producidas: 15200,
+      lote_id: 45
+    }
+  ],
+  tintas: [
+    {
+      posicion: 'frente',
+      numero_color: 1,
+      codigo_pantone: 'PMS 186 C',
+      tipo: 'Solvent-based',
+      marca: 'INX',
+      lote: 'INX-2024-03-186'
+    },
+    {
+      posicion: 'frente',
+      numero_color: 2,
+      codigo_pantone: 'PMS Process Black',
+      tipo: 'Solvent-based',
+      marca: 'INX',
+      lote: 'INX-2024-03-BLK'
+    }
+    // ... up to 8 colors
+  ],
+  muestras_calidad: [
+    {
+      inspeccion_indice: 1,
+      parametro: 'viscosidad_tinta',
+      valor: 21.5,
+      resultado: 'Cumple',
+      tinta_posicion: 'frente',
+      tinta_numero_color: 1,
+      tinta_codigo_pantone: 'PMS 186 C'
+    },
+    {
+      inspeccion_indice: 1,
+      parametro: 'adherencia_tinta',
+      resultado: 'Pasa',
+      tinta_posicion: 'frente',
+      tinta_numero_color: 1,
+      tinta_codigo_pantone: 'PMS 186 C'
+    }
+    // ... for all inks, all 3 inspections
+  ]
+}
+```
+
+**Implementation**: `imprenta.service.js:16-32`
+
+### POST `/api/imprenta/guardar`
+
+Saves shift printing data:
+
+**Request Body**:
+```javascript
+{
+  bitacora_id: 42,
+  orden_id: 678,
+  rollos: [
+    {
+      codigo_rollo: 'R047-T05-L001',
+      metros_consumidos: 1830,
+      impresiones_producidas: 15200
+    }
+  ],
+  tintas: [
+    {
+      posicion: 'frente',
+      numero_color: 1,
+      codigo_pantone: 'PMS 186 C',
+      tipo: 'Solvent-based',
+      marca: 'INX',
+      lote: 'INX-2024-03-186'
+    },
+    {
+      posicion: 'frente',
+      numero_color: 2,
+      codigo_pantone: 'PMS Process Black',
+      tipo: 'Solvent-based',
+      marca: 'INX',
+      lote: 'INX-2024-03-BLK'
+    }
+  ],
+  muestras: [
+    {
+      inspeccion_indice: 1,
+      parametro: 'viscosidad_tinta',
+      valor: 21.5,
+      tinta_posicion: 'frente',
+      tinta_numero_color: 1,
+      tinta_codigo_pantone: 'PMS 186 C'
+    },
+    {
+      inspeccion_indice: 1,
+      parametro: 'adherencia_tinta',
+      resultado: 'Pasa',
+      tinta_posicion: 'frente',
+      tinta_numero_color: 1,
+      tinta_codigo_pantone: 'PMS 186 C'
+    },
+    // Repeat for ink 2, then repeat all for inspections 2 and 3...
+  ],
+  desperdicio_kg: 22.5,
+  tipo_desperdicio: 'DESP-01',
+  parametros_operativos: {
+    velocidad_linea: 100,
+    tension_sustrato: 45
+  },
+  observaciones: ''
+}
+```
+
+**Response**:
+```javascript
+{
+  registro_id: 92,
+  estado: 'Completo'
+}
+```
+
+**Transaction Flow** (`imprenta.service.js:90-259`):
+1. Delete previous shift data
+2. Get/create `linea_ejecucion`
+3. Save `registros_trabajo` with total impressions
+4. For each roll:
+   - Infer origin process from code pattern
+   - Find or create lot: `{codigo_rollo}-I{correlativo}`
+   - Save roll consumption with lot reference
+5. Save ink declarations
+6. Save quality samples (auto-calculate viscosity pass/fail)
+7. Calculate process state
+8. Update `bitacora_maquina_status`
+
+**Implementation**: `imprenta.service.js:37-259`  
+**Permission Required**: `MANAGE_PRODUCTION`
+
+## Machine Status States
+
+**Calculated in**: `imprenta.service.js:204-253`
+
+- **Sin datos**: No production, samples, or inks declared
+- **Parcial**: Some data recorded
+- **Completo**:
+  - At least 1 roll processed
+  - 3 inspections (indices 1, 2, 3)
+  - Each inspection has at least 1 sample per declared ink
+  - Inks declared
+- **Con desviación**: Complete but viscosity or adhesion failed
+
+**Completeness Check** (`imprenta.service.js:216-232`):
+```javascript
+const numTintasActivas = tintas.length;
+const inspeccionesIndices = [...new Set(muestras.map(m => m.inspeccion_indice))];
+const tiene3Inspecciones = [1, 2, 3].every(i => inspeccionesIndices.includes(i));
+
+let muestrasPorTintaOk = true;
+if (numTintasActivas > 0) {
+  for (let i = 1; i <= 3; i++) {
+    const muestrasInspec = muestras.filter(m => m.inspeccion_indice === i);
+    const tintasEnMuestra = [...new Set(muestrasInspec.map(m => `${m.tinta_posicion}-${m.tinta_numero_color}`))];
+    if (tintasEnMuestra.length < numTintasActivas) {
+      muestrasPorTintaOk = false;
+      break;
+    }
+  }
+}
+```
+
+## Traceability
+
+### Roll and Lot Flow
+
+```
+Laminado produces lot: R047-T05-L001
+          ↓
+Imprenta consumes R047-T05-L001, prints 15,200 impressions
+          ↓
+Imprenta generates lot: R047-T05-L001-I001
+          ↓
+Conversión consumes lot R047-T05-L001-I001
+```
+
+### Ink-to-Sample Linkage
+
+Each quality sample references:
+- `tinta_posicion`: 'frente' or 'dorso'
+- `tinta_numero_color`: 1-8
+- `tinta_codigo_pantone`: exact Pantone code
+
+This creates full traceability from ink lot to printed result.
+
+## Operational Rules
+
+### Personnel Requirements (`ImprentaContract.js:52-56`)
+
+```javascript
+personalOperativo: {
+  minimo: 2,
+  maximo: 2,
+  reglasEspeciales: '2 personas obligatorias.'
+}
+```
+
+### Stop Restrictions (`ImprentaContract.js:19-26`)
+
+```javascript
+restriccionesInicio: [
+  'Sin rollos de entrada disponibles (Telares o Laminado)',
+  'Falta de tinta',
+  'Cambio de estilo/arte en proceso',
+  'Falla mecánica de la impresora',
+  'Temperatura o viscosidad de tinta fuera de rango'
+]
+```
+
+### Downtime Categories (`ImprentaContract.js:46-51`)
+
+- **Operational**: Plate changeover, viscosity adjustment, roller washing, color adjustment
+- **Mechanical**: Drying system failure, pinion breakage, winder motor failure
+- **Quality**: Poor adhesion, out of register, ink spots, incorrect tone
+- **External**: Solvent shortage, electrical failure, lack of base fabric
+
+## Impact of Variability (`ImprentaContract.js:57-60`)
+
+```javascript
+impactoVariabilidad: [
+  {
+    condicion: 'Viscosidad de tinta incorrecta',
+    impacto: 'Provoca secado lento, repinte o pérdida de intensidad de color.'
+  },
+  {
+    condicion: 'Desgaste de clichés',
+    impacto: 'Genera imágenes borrosas y requiere paros para limpieza frecuente.'
+  }
+]
+```
+
+## Related Processes
+
+- **Upstream**: [Telares](/processes/telares) (Process 2), [Laminado](/processes/laminado) (Process 3)
+- **Downstream**: [Conversión](/processes/conversion) (Process 5), [Conversión Sacos Vestidos](/processes/vestidos) (Process 9)
+- **Related**: [Production Orders](/quality/orders), [Lot Management](/quality/lots)

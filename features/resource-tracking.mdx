@@ -1,0 +1,638 @@
+---
+title: 'Resource Tracking'
+description: 'Material consumption tracking and inventory integration'
+icon: 'box'
+---
+
+PROD-SYS tracks raw material and consumable usage at the production record level, enabling accurate cost accounting, inventory synchronization, and material traceability.
+
+## Key Capabilities
+
+<CardGroup cols={2}>
+  <Card title="Resource Catalog" icon="list">
+    Maintain a master catalog of materials, consumables, and supplies with codes, descriptions, and units of measure.
+  </Card>
+  <Card title="Consumption Recording" icon="arrow-down-to-line">
+    Log material consumption per production record (registro_trabajo) with quantities and timestamps.
+  </Card>
+  <Card title="Inventory Integration" icon="warehouse">
+    Sync consumption data with external ERP systems for real-time inventory deductions.
+  </Card>
+  <Card title="Cost Tracking" icon="dollar-sign">
+    Calculate material costs per order, process, and shift for accurate production costing.
+  </Card>
+</CardGroup>
+
+---
+
+## Resource Catalog (RECURSO)
+
+### Master Data Structure
+
+All materials and consumables are registered in the `RECURSO` table:
+
+**Resource Schema**:
+```sql
+CREATE TABLE RECURSO (
+  id INTEGER PRIMARY KEY,
+  codigo TEXT UNIQUE NOT NULL,         -- Material code (e.g., "MAT-PP-001")
+  nombre TEXT NOT NULL,                -- Display name (e.g., "Polipropileno Virgen")
+  descripcion TEXT,                    -- Detailed description
+  tipo TEXT NOT NULL,                  -- 'Materia Prima', 'Consumible', 'Insumo'
+  unidad_medida TEXT NOT NULL          -- 'KG', 'L', 'UND', 'M', 'M2'
+);
+```
+
+**Resource Types**:
+- **Materia Prima**: Raw materials (e.g., polymer resins, pigments, additives)
+- **Consumible**: Consumable supplies (e.g., cutting wire, cleaning solvents)
+- **Insumo**: Indirect materials (e.g., packaging, labels)
+
+**Source Reference**: `backend/domains/resources/recurso.repository.js`
+
+### Creating Resources
+
+**UI Flow**:
+1. Navigate to **Resources → Catalog**
+2. Click **Add Resource**
+3. Enter resource details:
+   - **Código**: Unique identifier (validated for uniqueness)
+   - **Nombre**: Display name
+   - **Descripción**: Optional detailed description
+   - **Tipo**: Select from dropdown
+   - **Unidad de Medida**: Select from standard units
+4. Save resource
+
+**API Endpoint**: `POST /api/resources/recursos`
+
+**Request Body**:
+```json
+{
+  "codigo": "MAT-PP-001",
+  "nombre": "Polipropileno Virgen",
+  "descripcion": "Resina PP grado alimenticio, MFI 12",
+  "tipo": "Materia Prima",
+  "unidad_medida": "KG"
+}
+```
+
+**Repository Method** (from `recurso.repository.js:14`):
+```javascript
+async create(data) {
+  const { codigo, nombre, descripcion, tipo, unidad_medida } = data;
+  const result = await this.db.run(
+    'INSERT INTO RECURSO (codigo, nombre, descripcion, tipo, unidad_medida) VALUES (?, ?, ?, ?, ?)',
+    [codigo, nombre, descripcion, tipo, unidad_medida]
+  );
+  return result.lastID;
+}
+```
+
+**Source Reference**: `backend/domains/resources/recurso.repository.js:14`
+
+---
+
+## Consumption Recording (CONSUMO)
+
+### Recording Material Usage
+
+Material consumption is recorded per production record (`registro_trabajo`):
+
+**Consumption Schema**:
+```sql
+CREATE TABLE CONSUMO (
+  id INTEGER PRIMARY KEY,
+  registro_trabajo_id INTEGER NOT NULL,  -- Link to production record
+  recurso_id INTEGER NOT NULL,           -- Link to resource
+  cantidad_consumida REAL NOT NULL,      -- Quantity consumed
+  timestamp_consumo TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (registro_trabajo_id) REFERENCES registros_trabajo(id),
+  FOREIGN KEY (recurso_id) REFERENCES RECURSO(id)
+);
+```
+
+**Data Model Relationship**:
+```
+orden_produccion (1) ─┬─> lineas_ejecucion (*)
+                      │
+                      └─> registros_trabajo (*) ─> CONSUMO (*) -> RECURSO
+                                                │
+                                                └─> bitacora_turno
+```
+
+Each production record can have multiple consumption entries (one per material type).
+
+**Source Reference**: `backend/domains/resources/consumo.repository.js`
+
+### UI Flow for Consumption
+
+**Standard Workflow**:
+1. Operator opens bitácora → Selects process → Records production
+2. **Add Material Consumption** button becomes available
+3. Click **Add Material**
+4. Select resource from dropdown (filtered by process if applicable)
+5. Enter `cantidad_consumida` (quantity)
+6. System validates:
+   - Resource exists
+   - Quantity > 0
+   - Unit of measure matches resource definition
+7. Save consumption record
+
+**API Endpoint**: `POST /api/resources/consumos`
+
+**Request Body**:
+```json
+{
+  "registro_trabajo_id": 456,
+  "recurso_id": 12,
+  "cantidad_consumida": 250.5
+}
+```
+
+**Repository Method** (from `consumo.repository.js:14`):
+```javascript
+async create(data) {
+  const { registro_trabajo_id, recurso_id, cantidad_consumida, timestamp_consumo } = data;
+  const result = await this.db.run(
+    'INSERT INTO CONSUMO (registro_trabajo_id, recurso_id, cantidad_consumida, timestamp_consumo) VALUES (?, ?, ?, ?)',
+    [registro_trabajo_id, recurso_id, cantidad_consumida, timestamp_consumo]
+  );
+  return result.lastID;
+}
+```
+
+**Source Reference**: `backend/domains/resources/consumo.repository.js:14`
+
+---
+
+## Consumption Queries
+
+### Consumption by Production Record
+
+**API Endpoint**: `GET /api/resources/consumos?registro_trabajo_id={id}`
+
+**Query Implementation** (from `consumo.repository.js:6`):
+```javascript
+async findByRegistroId(registroId) {
+  return await this.db.query(
+    'SELECT * FROM CONSUMO WHERE registro_trabajo_id = ? ORDER BY timestamp_consumo DESC',
+    [registroId]
+  );
+}
+```
+
+**Response Example**:
+```json
+[
+  {
+    "id": 789,
+    "registro_trabajo_id": 456,
+    "recurso_id": 12,
+    "cantidad_consumida": 250.5,
+    "timestamp_consumo": "2026-03-06T10:30:00Z"
+  },
+  {
+    "id": 790,
+    "registro_trabajo_id": 456,
+    "recurso_id": 15,
+    "cantidad_consumida": 5.2,
+    "timestamp_consumo": "2026-03-06T10:35:00Z"
+  }
+]
+```
+
+**Source Reference**: `backend/domains/resources/consumo.repository.js:6`
+
+### Consumption by Order
+
+**SQL Query Pattern**:
+```sql
+SELECT 
+  r.codigo,
+  r.nombre,
+  r.unidad_medida,
+  SUM(c.cantidad_consumida) as total_consumido
+FROM CONSUMO c
+JOIN RECURSO r ON c.recurso_id = r.id
+JOIN registros_trabajo rt ON c.registro_trabajo_id = rt.id
+JOIN lineas_ejecucion le ON rt.linea_ejecucion_id = le.id
+WHERE le.orden_produccion_id = ?
+GROUP BY r.id
+ORDER BY r.codigo;
+```
+
+**Use Case**: Cost accounting per production order
+
+### Consumption by Process and Shift
+
+**SQL Query Pattern**:
+```sql
+SELECT 
+  r.codigo,
+  r.nombre,
+  SUM(c.cantidad_consumida) as total,
+  r.unidad_medida
+FROM CONSUMO c
+JOIN RECURSO r ON c.recurso_id = r.id
+JOIN registros_trabajo rt ON c.registro_trabajo_id = rt.id
+WHERE rt.bitacora_id = ?
+GROUP BY r.id;
+```
+
+**Use Case**: Daily material usage reporting per shift
+
+---
+
+## Integration with Production
+
+### Consumption Timing
+
+Material consumption is recorded **after** production is registered:
+
+**Sequence**:
+1. Operator records production quantity in `registros_trabajo`
+2. `registro_trabajo` receives an ID (e.g., 456)
+3. Operator records material consumption entries linked to `registro_trabajo_id = 456`
+4. Multiple materials can be recorded for a single production record
+
+**Example Scenario** (Extrusor PP process):
+```javascript
+// Step 1: Record production
+const registroId = await registroTrabajoRepository.create({
+  linea_ejecucion_id: 123,
+  bitacora_id: 789,
+  cantidad_producida: 500.0,  // 500 KG of extruded film
+  merma_kg: 12.5,
+  observaciones: 'Producción normal'
+});
+
+// Step 2: Record material consumption
+await consumoRepository.create({
+  registro_trabajo_id: registroId,
+  recurso_id: 12,              // Polipropileno Virgen
+  cantidad_consumida: 480.0    // 480 KG consumed
+});
+
+await consumoRepository.create({
+  registro_trabajo_id: registroId,
+  recurso_id: 15,              // Pigmento Azul
+  cantidad_consumida: 8.5      // 8.5 KG consumed
+});
+```
+
+### Material Balance Validation
+
+**Formula**:
+```
+Input Materials = Output Production + Waste + Unaccounted Loss
+```
+
+**Implementation Note**: PROD-SYS currently records consumption and waste independently. Future enhancement could add validation:
+```javascript
+const totalInput = consumos.reduce((sum, c) => sum + c.cantidad_consumida, 0);
+const totalOutput = registro.cantidad_producida + registro.merma_kg;
+const loss = totalInput - totalOutput;
+
+if (Math.abs(loss) > threshold) {
+  throw new ValidationError(
+    `Material balance mismatch: Input ${totalInput} KG, Output ${totalOutput} KG, Loss ${loss.toFixed(2)} KG`
+  );
+}
+```
+
+---
+
+## Inventory Integration
+
+### ERP Synchronization
+
+PROD-SYS consumption data can be synchronized with external ERP systems (e.g., SAP) for inventory deductions:
+
+**Sync Flow**:
+1. **Nightly Batch Job**: Export all `CONSUMO` records created since last sync
+2. **Format Conversion**: Transform to ERP-compatible format (e.g., IDOC, CSV)
+3. **Post to ERP**: Send material movements (goods issue documents)
+4. **Confirmation**: Mark records as synced with `sync_timestamp`
+
+**Schema Enhancement** (for sync tracking):
+```sql
+ALTER TABLE CONSUMO ADD COLUMN synced INTEGER DEFAULT 0;
+ALTER TABLE CONSUMO ADD COLUMN sync_timestamp TEXT;
+ALTER TABLE CONSUMO ADD COLUMN sync_doc_number TEXT;  -- ERP document number
+```
+
+**Sync Query**:
+```sql
+SELECT 
+  c.id,
+  r.codigo as material_code,
+  c.cantidad_consumida,
+  r.unidad_medida,
+  bt.fecha_operativa,
+  op.codigo_orden
+FROM CONSUMO c
+JOIN RECURSO r ON c.recurso_id = r.id
+JOIN registros_trabajo rt ON c.registro_trabajo_id = rt.id
+JOIN bitacora_turno bt ON rt.bitacora_id = bt.id
+JOIN lineas_ejecucion le ON rt.linea_ejecucion_id = le.id
+JOIN orden_produccion op ON le.orden_produccion_id = op.id
+WHERE c.synced = 0
+ORDER BY c.timestamp_consumo;
+```
+
+**Post-Sync Update**:
+```sql
+UPDATE CONSUMO 
+SET synced = 1, 
+    sync_timestamp = CURRENT_TIMESTAMP,
+    sync_doc_number = ?
+WHERE id = ?;
+```
+
+**Implementation Note**: Sync logic is typically implemented in a separate integration service, not in the core PROD-SYS backend.
+
+---
+
+## Material Costing
+
+### Cost Calculation
+
+If resource costs are maintained, consumption records enable production cost calculation:
+
+**Enhanced Resource Schema** (with costing):
+```sql
+ALTER TABLE RECURSO ADD COLUMN costo_unitario REAL;  -- Cost per unit
+ALTER TABLE RECURSO ADD COLUMN moneda TEXT DEFAULT 'USD';
+ALTER TABLE RECURSO ADD COLUMN fecha_ultima_actualizacion TEXT;
+```
+
+**Cost Query by Order**:
+```sql
+SELECT 
+  op.codigo_orden,
+  SUM(c.cantidad_consumida * r.costo_unitario) as costo_materiales
+FROM CONSUMO c
+JOIN RECURSO r ON c.recurso_id = r.id
+JOIN registros_trabajo rt ON c.registro_trabajo_id = rt.id
+JOIN lineas_ejecucion le ON rt.linea_ejecucion_id = le.id
+JOIN orden_produccion op ON le.orden_produccion_id = op.id
+WHERE op.id = ?
+GROUP BY op.id;
+```
+
+**Cost Query by Process**:
+```sql
+SELECT 
+  le.proceso_id,
+  SUM(c.cantidad_consumida * r.costo_unitario) as costo_materiales
+FROM CONSUMO c
+JOIN RECURSO r ON c.recurso_id = r.id
+JOIN registros_trabajo rt ON c.registro_trabajo_id = rt.id
+JOIN lineas_ejecucion le ON rt.linea_ejecucion_id = le.id
+WHERE rt.bitacora_id = ?
+GROUP BY le.proceso_id;
+```
+
+---
+
+## Material Traceability
+
+### Forward Traceability
+
+**Query**: "Which materials were used to produce order X?"
+
+```sql
+SELECT 
+  r.codigo,
+  r.nombre,
+  c.cantidad_consumida,
+  r.unidad_medida,
+  bt.fecha_operativa,
+  bt.turno,
+  c.timestamp_consumo
+FROM CONSUMO c
+JOIN RECURSO r ON c.recurso_id = r.id
+JOIN registros_trabajo rt ON c.registro_trabajo_id = rt.id
+JOIN lineas_ejecucion le ON rt.linea_ejecucion_id = le.id
+JOIN bitacora_turno bt ON rt.bitacora_id = bt.id
+WHERE le.orden_produccion_id = ?
+ORDER BY c.timestamp_consumo;
+```
+
+**Use Case**: Quality investigation (e.g., "Was pigment batch Y used in this defective order?")
+
+### Backward Traceability
+
+**Query**: "Which orders consumed material batch Z?"
+
+**Enhanced Schema** (with material batch tracking):
+```sql
+ALTER TABLE CONSUMO ADD COLUMN lote_material TEXT;  -- Material batch/lot number
+```
+
+**Query**:
+```sql
+SELECT 
+  op.codigo_orden,
+  op.producto,
+  c.cantidad_consumida,
+  bt.fecha_operativa,
+  bt.turno
+FROM CONSUMO c
+JOIN registros_trabajo rt ON c.registro_trabajo_id = rt.id
+JOIN lineas_ejecucion le ON rt.linea_ejecucion_id = le.id
+JOIN orden_produccion op ON le.orden_produccion_id = op.id
+JOIN bitacora_turno bt ON rt.bitacora_id = bt.id
+WHERE c.recurso_id = ? AND c.lote_material = ?
+ORDER BY c.timestamp_consumo;
+```
+
+**Use Case**: Recall scenario (e.g., "Material batch Z is defective, which finished goods are affected?")
+
+---
+
+## Reporting & Analytics
+
+### Daily Material Usage Report
+
+**Report Structure**:
+```
+Reporte de Consumo de Materiales
+Fecha: 2026-03-06
+Turno: Día
+
+Material                      | Cantidad | Unidad | Costo
+-----------------------------|----------|--------|--------
+Polipropileno Virgen         | 1,250.5  | KG     | $3,126.25
+Pigmento Azul                | 15.2     | KG     | $456.00
+Aditivo UV                   | 8.0      | KG     | $240.00
+-----------------------------|----------|--------|--------
+Total                        |          |        | $3,822.25
+```
+
+**SQL Query**:
+```sql
+SELECT 
+  r.nombre,
+  SUM(c.cantidad_consumida) as cantidad,
+  r.unidad_medida,
+  SUM(c.cantidad_consumida * r.costo_unitario) as costo
+FROM CONSUMO c
+JOIN RECURSO r ON c.recurso_id = r.id
+JOIN registros_trabajo rt ON c.registro_trabajo_id = rt.id
+JOIN bitacora_turno bt ON rt.bitacora_id = bt.id
+WHERE bt.fecha_operativa = ? AND bt.turno = ?
+GROUP BY r.id
+ORDER BY r.nombre;
+```
+
+### Material Consumption Trends
+
+**Query** (30-day trend by material):
+```sql
+SELECT 
+  r.codigo,
+  r.nombre,
+  bt.fecha_operativa,
+  SUM(c.cantidad_consumida) as consumo_diario
+FROM CONSUMO c
+JOIN RECURSO r ON c.recurso_id = r.id
+JOIN registros_trabajo rt ON c.registro_trabajo_id = rt.id
+JOIN bitacora_turno bt ON rt.bitacora_id = bt.id
+WHERE bt.fecha_operativa >= date('now', '-30 days')
+GROUP BY r.id, bt.fecha_operativa
+ORDER BY bt.fecha_operativa, r.codigo;
+```
+
+**Visualization**: Line chart showing daily consumption by material over 30 days
+
+### Waste Analysis
+
+**Query** (waste ratio by process):
+```sql
+SELECT 
+  le.proceso_id,
+  SUM(rt.cantidad_producida) as produccion_total,
+  SUM(rt.merma_kg) as merma_total,
+  (SUM(rt.merma_kg) / SUM(rt.cantidad_producida) * 100) as porcentaje_merma
+FROM registros_trabajo rt
+JOIN lineas_ejecucion le ON rt.linea_ejecucion_id = le.id
+JOIN bitacora_turno bt ON rt.bitacora_id = bt.id
+WHERE bt.fecha_operativa >= date('now', '-30 days')
+GROUP BY le.proceso_id
+ORDER BY porcentaje_merma DESC;
+```
+
+**Use Case**: Identify processes with high waste for improvement initiatives
+
+---
+
+## Future Enhancements
+
+### Batch-Level Material Tracking
+
+**Enhancement**: Link material consumption to specific material batches (lote_material):
+
+```sql
+CREATE TABLE LOTE_MATERIAL (
+  id INTEGER PRIMARY KEY,
+  recurso_id INTEGER NOT NULL,
+  codigo_lote TEXT UNIQUE NOT NULL,
+  fecha_recepcion TEXT NOT NULL,
+  cantidad_recibida REAL NOT NULL,
+  cantidad_disponible REAL NOT NULL,
+  proveedor TEXT,
+  certificado_calidad TEXT,
+  estado TEXT DEFAULT 'disponible',  -- disponible, cuarentena, agotado
+  FOREIGN KEY (recurso_id) REFERENCES RECURSO(id)
+);
+```
+
+**Consumption Enhancement**:
+```sql
+ALTER TABLE CONSUMO ADD COLUMN lote_material_id INTEGER REFERENCES LOTE_MATERIAL(id);
+```
+
+**Benefit**: Full traceability from raw material batch to finished goods batch
+
+### Real-Time Inventory Deductions
+
+**Enhancement**: Implement real-time inventory updates instead of batch sync:
+
+**Trigger** (on consumption insert):
+```sql
+CREATE TRIGGER after_consumo_insert
+AFTER INSERT ON CONSUMO
+FOR EACH ROW
+BEGIN
+  UPDATE LOTE_MATERIAL
+  SET cantidad_disponible = cantidad_disponible - NEW.cantidad_consumida
+  WHERE id = NEW.lote_material_id;
+END;
+```
+
+**Validation** (prevent negative inventory):
+```javascript
+const lote = await db.get(
+  'SELECT cantidad_disponible FROM LOTE_MATERIAL WHERE id = ?',
+  [lote_material_id]
+);
+
+if (lote.cantidad_disponible < cantidad_consumida) {
+  throw new ValidationError(
+    `Inventario insuficiente: Disponible ${lote.cantidad_disponible}, Requerido ${cantidad_consumida}`
+  );
+}
+```
+
+### Automatic BOM Validation
+
+**Enhancement**: Validate material consumption against Bill of Materials (BOM):
+
+**BOM Schema**:
+```sql
+CREATE TABLE BOM (
+  id INTEGER PRIMARY KEY,
+  producto TEXT NOT NULL,              -- References orden_produccion.producto
+  recurso_id INTEGER NOT NULL,
+  cantidad_por_unidad REAL NOT NULL,   -- Material quantity per output unit
+  FOREIGN KEY (recurso_id) REFERENCES RECURSO(id)
+);
+```
+
+**Validation Logic**:
+```javascript
+const bom = await db.query(
+  'SELECT * FROM BOM WHERE producto = ?',
+  [orden.producto]
+);
+
+for (const bomItem of bom) {
+  const expectedQty = bomItem.cantidad_por_unidad * registro.cantidad_producida;
+  const actualQty = consumos.find(c => c.recurso_id === bomItem.recurso_id)?.cantidad_consumida || 0;
+  
+  const variance = Math.abs(actualQty - expectedQty) / expectedQty;
+  if (variance > 0.10) {  // 10% tolerance
+    warnings.push(`Material ${bomItem.recurso_id}: Expected ${expectedQty}, Actual ${actualQty}`);
+  }
+}
+```
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Production Management" icon="industry" href="/features/production-management">
+    See how resource consumption integrates with production records
+  </Card>
+  <Card title="Quality Control" icon="microscope" href="/features/quality-control">
+    Track material batches through quality validation
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/auth/login">
+    Explore resource tracking API endpoints
+  </Card>
+  <Card title="Dashboard" icon="chart-line" href="/introduction">
+    View material usage trends and cost analytics
+  </Card>
+</CardGroup>

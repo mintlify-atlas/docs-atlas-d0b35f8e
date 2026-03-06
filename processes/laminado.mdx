@@ -1,0 +1,526 @@
+---
+title: Laminado (Lamination)
+description: Coating process that applies a thin polymer curtain to woven fabric for waterproofing and reinforcement
+---
+
+## Overview
+
+Laminado (Process ID: 3) applies a thin extruded polymer coating to circular woven fabric, creating a laminated material suitable for high-performance industrial bags. This process enhances fabric properties by adding waterproofing, strength, and printability.
+
+### Process Characteristics
+
+- **Process Type**: Order-based production
+- **Production Unit**: meters
+- **Product**: Laminated polypropylene fabric with polymer coating
+- **Machines**: 1 lamination line (LAM01)
+- **Order Pattern**: `3\d{6}` (e.g., 3000245)
+- **Production Target**: 21,000 meters per shift
+- **Line Speed**: 40 m/min nominal
+
+### What This Process Does
+
+The Laminado process:
+- **Receives**: Fabric rolls from Telares (Process 2), lamination resins (PE/PP)
+- **Transforms**: Woven fabric + polymer curtain → Laminated fabric
+- **Delivers**: Laminated rolls ready for printing or conversion
+- **Method**: Extrusion coating with integrated extruder and corona treatment
+
+## Production Flow
+
+### Upstream Dependencies
+
+Laminado consumes fabric rolls from:
+- **Telares (Process 2)**: Primary fabric source
+  - Roll format: `R{3-digit}-T{2-digit}` (e.g., R047-T05)
+
+### Downstream Consumers
+
+Laminated fabric feeds into:
+- **Imprenta (Process 4)**: Printing process
+- **Conversión (Process 5)**: Direct bag conversion (unprinted)
+
+### Production Tracking Method
+
+**Accumulated Counter Method** (same as Telares):
+
+```javascript
+reglasProduccion: {
+  metodo: 'diferencia_acumulado_contador',
+  descripcion: 'Operator records accumulated meter counter at shift end or order change. Production = difference from last recorded value.',
+  unidad: 'meters',
+  registroPorCambioDeOrden: true,
+  rolloParcialEntreturnos: true
+}
+```
+
+**Partial Roll Handling** (`LaminadoContract.js:170-172`):
+> A fabric roll may start lamination in one shift and complete in another. Each shift records its meters processed independently using the same roll code.
+
+## Data Structures
+
+### Key Tables
+
+#### registros_trabajo
+```javascript
+{
+  linea_ejecucion_id: FK,
+  bitacora_id: FK,
+  maquina_id: 1, // LAM01
+  cantidad_producida: meters_totales,
+  merma_kg: waste,
+  parametros: JSON {
+    metros_totales: calculated from counter,
+    acumulado_contador: integer,
+    temperaturas: { zona_1: 180, zona_2: 185, ... zona_14: 220 },
+    rpm_extrusor: 45,
+    velocidad_linea: 40,
+    amperaje_tratador_corona: 2.5,
+    pelicula_impresa: { /* optional */ }
+  }
+}
+```
+
+#### laminado_consumo_rollo
+Tracks fabric rolls consumed:
+```javascript
+{
+  bitacora_id: FK,
+  maquina_id: 1,
+  orden_id: FK,
+  codigo_rollo: 'R047-T05',
+  metros_laminados: calculated diff,
+  registro_trabajo_id: FK
+}
+```
+
+#### laminado_materias_primas
+Coating formula ingredients:
+```javascript
+{
+  bitacora_id: FK,
+  maquina_id: 1,
+  tipo: 'LDPE' | 'Polipropileno de inyección' | 'Masterbatch colorante' | ...,
+  marca: text,
+  lote_material: text,
+  porcentaje: decimal, // must sum to 100%
+  pdf_hoja_tecnica: BLOB (optional),
+  pdf_nombre_archivo: text
+}
+```
+
+#### laminado_materiales_pdf_central
+Central datasheet storage:
+```javascript
+{
+  tipo: text,
+  marca: text,
+  lote_material: text,
+  pdf_hoja_tecnica: BLOB,
+  pdf_nombre_archivo: text,
+  PRIMARY KEY (tipo, marca, lote_material)
+}
+```
+
+**Datasheet Management** (`laminado.service.js:27-39`, `214-234`):
+- PDFs uploaded once and reused automatically for same material/brand/lot
+- If no PDF in payload, system retrieves from central storage
+- If new PDF provided, central storage is updated
+
+### Lot Generation
+
+**Per-Roll Lot Creation** (`laminado.service.js:158-198`):
+
+Each laminated roll generates a unique lot:
+```javascript
+codigo_lote = `${codigo_rollo}-L${correlativo}`
+// Example: R047-T05-L001
+```
+
+Correlative increments per order across all shifts.
+
+## Quality Parameters
+
+### Critical Parameters
+
+#### 1. Curtain Weight (gramaje_cortina)
+- **Unit**: g/m²
+- **Nominal**: 20 g/m²
+- **Tolerance**: ±3 g/m²
+- **Range**: 17-23 g/m²
+- **Sampling**: Per laminated roll
+- **Impact**: Determines waterproofing and strength
+
+#### 2. Curtain Adhesion (adherencia)
+- **Type**: Pass/Fail test
+- **Sampling**: Per roll
+- **Method**: Manual peel test by inspector
+- **Critical**: Yes
+
+#### 3. Laminated Fabric Width (ancho_tela)
+- **Unit**: inches
+- **Tolerance**: ±0.25 inches (same as Telares)
+- **Nominal**: From active order
+- **Input Format**: Fractions of 1/8
+
+#### 4. Base Fabric Weight (gramaje_tejido)
+- **Type**: Informational only
+- **Unit**: g/m²
+- **Note**: Determined by tape denier from Extrusor PP; no compliance range
+
+### Operational Parameters (Informational)
+
+Recorded once per shift or order segment:
+
+**Temperatures** (14 zones + preheating roller):
+```javascript
+temp_zona_1 through temp_zona_14
+temp_rodo_precalentamiento
+```
+
+**Machine Settings**:
+```javascript
+rpm_extrusor
+velocidad_linea (m/min)
+amperaje_tratador_corona (A)
+```
+
+### Sampling Frequency (`LaminadoContract.js:147-154`)
+
+```javascript
+frecuenciaMuestreo: {
+  frecuencia: 'por_rollo',
+  descripcion: 'Quality parameters recorded per roll laminated. No fixed sample count — depends on rolls processed.',
+  muestrasMinTurno: 1,
+  omisionRequiereMotivo: true
+}
+```
+
+Note: Operational parameters (temps, RPM, speed) recorded once per order segment, not per roll.
+
+## Business Logic
+
+### Roll Input Validation (`laminado.service.js:174-179`)
+
+```javascript
+reglasRollosEntrada: {
+  formatoCodigo: 'R{numero_rollo_3_digitos}-T{numero_telar_2_digitos}',
+  ejemploCodigo: 'R047-T05',
+  registroIndividual: true,
+  notaCodigo: 'Operator enters code manually. If exists in DB (from Telares quality or production), system shows reference data. If not, allows free entry without blocking.'
+}
+```
+
+System permits roll codes not yet in database (operator may laminate faster than data entry).
+
+### Raw Material Formula Validation (`laminado.service.js:97-102`)
+
+```javascript
+if (materias_primas.length > 0) {
+  const suma = materias_primas.reduce((acc, mp) => acc + (mp.porcentaje || 0), 0);
+  if (Math.abs(suma - 100) > 0.01) {
+    throw new ValidationError('La suma de porcentajes de materias primas debe ser 100%.');
+  }
+}
+```
+
+Formula percentages must total exactly 100%.
+
+### Material Options (`LaminadoContract.js:190-198`)
+
+```javascript
+opcionesTipo: [
+  'Polipropileno de inyección',
+  'LDPE',
+  'Pelet (material reciclado)',
+  'Aditivo anti UV',
+  'Oxobiodegradable',
+  'Masterbatch colorante'
+]
+```
+
+Up to 6 materials per formula.
+
+### Purchased Printed Film (Optional)
+
+**Conditional Application** (`LaminadoContract.js:214-225`):
+
+Some orders require laminating onto pre-printed film from external suppliers:
+```javascript
+peliculaImpresa: {
+  aplica: 'condicional según orden de producción',
+  unidadRegistro: 'kg',
+  camposRegistro: [
+    { nombre: 'aplica_pelicula', tipo: 'boolean', origen: 'orden' },
+    { nombre: 'proveedor', tipo: 'texto libre' },
+    { nombre: 'referencia_material', tipo: 'texto libre' },
+    { nombre: 'kg_consumidos', tipo: 'numérico' }
+  ],
+  nota: 'No se gestiona como lote interno. Solo se registra como material consumido dentro del turno.'
+}
+```
+
+### Color Verification (`LaminadoContract.js:227-240`)
+
+```javascript
+verificacionColor: {
+  parametros: [{ nombre: 'color_cortina', tipo: 'cumple_no_cumple' }],
+  frecuencia: 'por_cambio_de_orden_y_una_vez_por_turno',
+  accionSiNoCumple: 'REVISION_OBLIGATORIA',
+  nota: 'Si el color no cumple se debe registrar en observaciones con explicación. A diferencia de Telares no implica paro automático, pero sí requiere justificación documentada.'
+}
+```
+
+Unlike Telares, color non-compliance doesn't force a stop but requires documented explanation.
+
+### Waste Handling (`LaminadoContract.js:242-248`)
+
+```javascript
+reglasDesperdicio: {
+  unidad: 'kg',
+  destinos: ['Peletizado', 'Descarte final'],
+  registroObligatorio: true,
+  nota: 'Siempre existe desperdicio aunque sea mínimo. Debe registrarse aunque no haya producción.'
+}
+```
+
+## API Endpoints
+
+### GET `/api/laminado/detalle/:maquinaId`
+
+Returns lamination line status for a shift:
+
+**Response**:
+```javascript
+{
+  maquina: { id: 2, codigo: 'LAM01', nombre_visible: 'Laminadora 1' },
+  estado_proceso: 'Completo',
+  ultimo_registro: {
+    id: 87,
+    orden_id: 245,
+    codigo_orden: '3000245',
+    cantidad_producida: 21500,
+    merma_kg: 15.3,
+    observaciones: '',
+    parametros: '{ "metros_totales": 21500, "acumulado_contador": 245600, ... }'
+  },
+  muestras: [
+    { parametro: 'gramaje_cortina', valor: 19.8, resultado: 'Cumple', valor_nominal: 20 },
+    { parametro: 'adherencia', valor: null, resultado: 'Pasa' },
+    { parametro: 'ancho_tela', valor: 22.5, resultado: 'Cumple', valor_nominal: 22.5 }
+    // ... per roll
+  ],
+  rollos_consumidos: [
+    { codigo_rollo: 'R047-T05', metros_laminados: 10200, orden_id: 245 },
+    { codigo_rollo: 'R048-T05', metros_laminados: 11300, orden_id: 245 }
+  ],
+  materias_primas: [
+    {
+      tipo: 'LDPE',
+      marca: 'ExxonMobil',
+      lote_material: 'LD2045-B',
+      porcentaje: 85,
+      tiene_pdf: true,
+      advertencia_pdf: null
+    },
+    {
+      tipo: 'Masterbatch colorante',
+      marca: 'Clariant',
+      lote_material: 'MC-BLANCO-2024',
+      porcentaje: 15,
+      tiene_pdf: false,
+      advertencia_pdf: 'Hoja técnica no subida para este material.'
+    }
+  ]
+}
+```
+
+**Implementation**: `laminado.service.js:18-49`
+
+### POST `/api/laminado/guardar`
+
+Saves shift lamination data:
+
+**Request Body**:
+```javascript
+{
+  bitacora_id: 42,
+  orden_id: 245,
+  rollos: [
+    {
+      codigo_rollo: 'R047-T05',
+      metros_laminados: 10200
+    },
+    {
+      codigo_rollo: 'R048-T05',
+      metros_laminados: 11300
+    }
+  ],
+  muestras: [
+    {
+      parametro: 'gramaje_cortina',
+      valor: 19.8,
+      resultado: 'Cumple',
+      valor_nominal: 20
+    },
+    {
+      parametro: 'adherencia',
+      resultado: 'Pasa'
+    },
+    {
+      parametro: 'ancho_tela',
+      valor: 22.5,
+      resultado: 'Cumple',
+      valor_nominal: 22.5
+    }
+    // Repeat for each roll...
+  ],
+  parametros_operativos: {
+    temp_zona_1: 180,
+    temp_zona_2: 185,
+    // ... through zona_14
+    temp_rodo_precalentamiento: 90,
+    rpm_extrusor: 45,
+    velocidad_linea: 40,
+    amperaje_tratador_corona: 2.5
+  },
+  materias_primas: [
+    {
+      tipo: 'LDPE',
+      marca: 'ExxonMobil',
+      lote_material: 'LD2045-B',
+      porcentaje: 85,
+      pdf_base64: null, // Or base64 string if uploading
+      pdf_nombre: null
+    },
+    {
+      tipo: 'Masterbatch colorante',
+      marca: 'Clariant',
+      lote_material: 'MC-BLANCO-2024',
+      porcentaje: 15
+    }
+  ],
+  pelicula_impresa: null, // Or { proveedor, referencia_material, kg_consumidos }
+  desperdicio_kg: 15.3,
+  observaciones: ''
+}
+```
+
+**Response**:
+```javascript
+{
+  registro_id: 87,
+  estado: 'Completo'
+}
+```
+
+**Validation Logic** (`laminado.service.js:69-116`):
+1. Order must exist and belong to Process 3
+2. Order cannot be Cancelled
+3. At least 1 roll if production > 0
+4. All rolls must have `codigo_rollo` and `metros_laminados > 0`
+5. Raw materials must sum to 100%
+6. At least 1 quality sample per roll laminated
+
+**Transaction Flow** (`laminado.service.js:119-271`):
+1. Delete previous shift data (idempotent)
+2. Get/create `linea_ejecucion`
+3. Save `registros_trabajo` with total meters and operational params
+4. For each roll:
+   - Save roll consumption record
+   - Generate lot code: `{codigo_rollo}-L{correlativo}`
+   - Create lot if doesn't exist
+5. Save quality samples
+6. Save raw materials + manage PDFs
+7. Calculate process state
+8. Update `bitacora_maquina_status`
+
+**Implementation**: `laminado.service.js:54-272`  
+**Permission Required**: `MANAGE_QUALITY`
+
+## Machine Status States
+
+**Calculated in**: `laminado.service.js:250-268`
+
+- **Sin datos**: No production, waste, or samples
+- **Parcial**: Some data recorded
+- **Completo**: 
+  - Production > 0
+  - At least 1 sample per roll
+  - Raw materials declared
+- **Con desviación**: Complete but quality parameters failed
+
+## Traceability
+
+### Roll and Lot Flow
+
+```
+Telares produces roll: R047-T05
+          ↓
+Laminado consumes R047-T05, laminates 10,200m
+          ↓
+Laminado generates lot: R047-T05-L001
+          ↓
+Imprenta or Conversión consume lot R047-T05-L001
+```
+
+### Material Datasheet Tracking
+
+**Central Storage Pattern**:
+1. Operator uploads PDF for LDPE / ExxonMobil / LD2045-B
+2. PDF stored in `laminado_materiales_pdf_central` by (tipo, marca, lote_material)
+3. Next shift using same material: system auto-retrieves PDF
+4. Operator can update PDF; central storage reflects latest version
+
+## Operational Rules
+
+### Personnel Requirements (`LaminadoContract.js:52-56`)
+
+```javascript
+personalOperativo: {
+  minimo: 2,
+  maximo: 2,
+  reglasEspeciales: '2 personas.'
+}
+```
+
+Fixed 2-person crew required.
+
+### Stop Restrictions (`LaminadoContract.js:20-26`)
+
+```javascript
+restriccionesInicio: [
+  'Sin rollos de tela disponibles de Telares',
+  'Falta de materia prima para cortina (resina, aditivos)',
+  'Falla mecánica de la laminadora o su extrusor',
+  'Temperatura fuera de rango al arranque',
+  'Cambio de orden en proceso'
+]
+```
+
+### Downtime Categories (`LaminadoContract.js:46-51`)
+
+- **Operational**: Roll mounting, recipe change, die lip cleaning, threading
+- **Mechanical**: Lamination extruder failure, cooling system failure, corona treater failure
+- **Quality**: Low adhesion, curtain weight variation, incorrect width
+- **External**: Lack of base fabric, power failure, resin shortage
+
+## Impact of Variability (`LaminadoContract.js:57-60`)
+
+```javascript
+impactoVariabilidad: [
+  {
+    condicion: 'Humedad en resina de laminación',
+    impacto: 'Causa ojos de pescado y falta de adherencia.'
+  },
+  {
+    condicion: 'Tensión irregular en tela base',
+    impacto: 'Provoca arrugas en el laminado y desperdicio de material.'
+  }
+]
+```
+
+## Related Processes
+
+- **Upstream**: [Telares](/processes/telares) (Process 2)
+- **Downstream**: [Imprenta](/processes/imprenta) (Process 4), [Conversión](/processes/conversion) (Process 5)
+- **Related**: [Production Orders](/quality/orders), [Lot Management](/quality/lots)

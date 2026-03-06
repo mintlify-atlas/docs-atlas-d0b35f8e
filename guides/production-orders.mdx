@@ -1,0 +1,303 @@
+---
+title: Managing Production Orders
+description: Complete guide to creating, importing, and managing production orders from SAP
+---
+
+Production orders are the foundation of PROD-SYS. They flow from SAP and drive all manufacturing activities across the nine production processes.
+
+## Understanding Production Orders
+
+Each production order has:
+- **7-digit SAP code**: First digit (1-9) identifies the process
+- **Product description**: From SAP material master
+- **Target quantity**: Planned production amount
+- **Unit of measure**: Automatically assigned based on process (KG, M2, MIL, UND)
+- **Status lifecycle**: Creada → Liberada → En producción → Cerrada/Cancelada
+
+### Process-to-Code Mapping
+
+| First Digit | Process | Default Unit |
+|-------------|---------|-------------|
+| 1 | Extrusor PP | KG |
+| 2 | Telares | M2 |
+| 3 | Laminado | M2 |
+| 4 | Imprenta | MIL |
+| 5 | Conversión sacos sin vestir | UND |
+| 6 | Extrusión PE | KG |
+| 7 | Conversión liner PE | UND |
+| 8 | Peletizado | KG |
+| 9 | Sacos vestidos | UND |
+
+## Creating Orders Manually
+
+Navigate to **Producción → Órdenes** in the sidebar.
+
+<Steps>
+  <Step title="Select Process">
+    Choose the production process from the dropdown. This determines the first digit of the order code and the unit of measure.
+  </Step>
+  
+  <Step title="Enter SAP Code">
+    Input the 7-digit SAP order number. The first digit must match the selected process (1-9).
+    
+    Example: For Telares process, use codes starting with 2 (e.g., 2000145).
+  </Step>
+  
+  <Step title="Fill Product Details">
+    - **Product**: Enter the product description from SAP
+    - **Target Quantity**: Specify the planned production amount
+    - **Unit**: Auto-populated based on process selection
+    - **Planned Date**: Set the due date for completion
+  </Step>
+  
+  <Step title="Set Priority">
+    Choose priority level:
+    - **Baja**: Low priority, flexible scheduling
+    - **Media**: Standard priority (default)
+    - **Alta**: High priority, urgent fulfillment
+    - **Crítica**: Critical, requires immediate attention
+  </Step>
+  
+  <Step title="Add Observations">
+    Include any special notes, customer requirements, or production instructions.
+  </Step>
+  
+  <Step title="Register Order">
+    Click **Registrar Orden de Producción**. The order is created with status "Creada".
+  </Step>
+</Steps>
+
+## Importing Orders from SAP
+
+The bulk import feature allows you to sync production orders directly from SAP exports.
+
+<Steps>
+  <Step title="Export from SAP">
+    Generate the SAP production orders report (open orders). Export to Excel format (.xlsx or .xls).
+    
+    Required columns:
+    - Series de documentos (process identifier)
+    - Nº documento (7-digit order number)
+    - Product description, quantities, dates
+  </Step>
+  
+  <Step title="Open Import Dialog">
+    In the orders list, click **Importar desde SAP** button.
+  </Step>
+  
+  <Step title="Upload Excel File">
+    Select your SAP export file and click **Previsualizar**.
+  </Step>
+  
+  <Step title="Review Preview">
+    The system analyzes the file and shows:
+    
+    **Nuevas órdenes**: Orders that will be imported
+    - Green indicator: Standard import
+    - Yellow indicator (●): Requires attention (negative quantities, overdue dates)
+    
+    **Ya existentes**: Orders already in PROD-SYS (skipped)
+    
+    **No reconocidas**: Orders with unknown SAP series (rejected)
+  </Step>
+  
+  <Step title="Validate Data">
+    Check the preview table:
+    - Verify process mappings are correct
+    - Review quantities and due dates
+    - Note any validation warnings
+  </Step>
+  
+  <Step title="Confirm Import">
+    Click **Confirmar e Importar**. The system:
+    - Validates each order (7-digit code, valid process ID, numeric quantities)
+    - Imports in batches of 50
+    - Skips duplicates automatically
+    - Logs all imports to audit trail
+  </Step>
+  
+  <Step title="Review Results">
+    The result summary shows:
+    - Number of orders imported successfully
+    - Orders omitted (with reasons)
+    - Any validation errors
+  </Step>
+</Steps>
+
+<Note>
+Orders already in PROD-SYS are never overwritten during import. Their data is managed in real-time within the system.
+</Note>
+
+## Managing Order Status
+
+### Status Transitions
+
+Orders move through a controlled lifecycle:
+
+<Steps>
+  <Step title="Creada → Liberada">
+    Release the order to make it available for production. No technical changes allowed after this point.
+  </Step>
+  
+  <Step title="Liberada → En producción">
+    Automatically updated when production begins (first registro de trabajo is logged).
+  </Step>
+  
+  <Step title="En producción → Pausada">
+    Temporarily pause the order. Provide a reason in observations.
+  </Step>
+  
+  <Step title="Pausada → En producción">
+    Resume production on a paused order.
+  </Step>
+  
+  <Step title="Any Status → Cerrada">
+    Close the order when production is complete. **Requires a closure reason**.
+    
+    The system validates:
+    - All quality checks are completed
+    - Production quantities are recorded
+    - No open incidents remain
+  </Step>
+  
+  <Step title="Any Status → Cancelada">
+    Cancel the order if it won't be produced. **Requires a cancellation reason**.
+  </Step>
+</Steps>
+
+### Closing an Order
+
+Navigate to the order in the list and click the close action.
+
+<Steps>
+  <Step title="Click Close Action">
+    Find the order in the orders table and click the close icon.
+  </Step>
+  
+  <Step title="Enter Closure Reason">
+    In the modal dialog, provide a detailed reason for closure. This is mandatory and recorded in the audit log.
+  </Step>
+  
+  <Step title="Confirm Closure">
+    Click **Confirmar Cierre**. The order status changes to "Cerrada" and becomes read-only.
+  </Step>
+</Steps>
+
+<Warning>
+Closed and canceled orders cannot have technical modifications. Only status and closure reason can be updated.
+</Warning>
+
+## Viewing Order Details
+
+The orders table displays key metrics:
+
+- **Orden**: SAP code (7 digits)
+- **Producto**: Product description
+- **Cant. Objetivo**: Target production quantity
+- **Cant. Producida**: Actual produced quantity (from registros de trabajo)
+- **Merma (kg)**: Total waste recorded
+- **Estado**: Current status with color coding
+- **Calidad**: Quality validation status
+
+### Filtering Orders
+
+Use the status filter dropdown to view:
+- All orders
+- Creadas (Created, not yet released)
+- Liberadas (Released for production)
+- En producción (Active production)
+- Cerradas (Completed)
+
+## SAP Integration Details
+
+### Import Validation Rules
+
+The system applies strict validation during import:
+
+1. **7-digit order code**: Must be numeric, exactly 7 digits
+2. **Process ID**: First digit must map to valid process (1-9)
+3. **Quantities**: Must be numeric (negative values allowed for SAP overproduction)
+4. **Dates**: Parsed as Excel dates, converted to ISO format
+5. **Duplicates**: Orders with existing SAP codes are skipped
+
+### Automatic Field Mapping
+
+Imported orders include SAP metadata in `especificaciones`:
+
+```json
+{
+  "sap_serie": "ExtruPP",
+  "sap_cantidad_completada": 5000,
+  "sap_cantidad_pendiente": 3000,
+  "sap_dias_atrasados": 2,
+  "sap_pedido_cliente": "SO-12345",
+  "sap_fecha_pedido": "2024-01-15",
+  "sap_fecha_inicio": "2024-01-20",
+  "importado_por": "username",
+  "importado_en": "2024-01-25T10:30:00Z"
+}
+```
+
+### Priority Assignment
+
+Orders with `dias_atrasados > 0` are automatically assigned **Alta** priority.
+
+## Production Tracking
+
+Orders are linked to execution through:
+
+1. **Líneas de Ejecución**: Connects order + process + machine
+2. **Registros de Trabajo**: Production records logged during shifts
+3. **Bitácora de Turno**: Shift logs that aggregate production data
+
+Produced quantities and waste automatically update the order summary.
+
+## Best Practices
+
+<Check>Import SAP orders daily or at the start of each planning cycle</Check>
+<Check>Set accurate priorities to guide production scheduling</Check>
+<Check>Review "no reconocidas" orders and update SAP series mapping if needed</Check>
+<Check>Close orders promptly after completion for accurate KPIs</Check>
+<Check>Use observations field for customer-specific requirements</Check>
+
+<Warning>Do not modify SAP codes after orders are released. This breaks traceability.</Warning>
+
+## Audit Trail
+
+All order changes are logged:
+- **Status changes**: Old status → New status with reason
+- **Field updates**: Changed fields with before/after values
+- **User attribution**: Every change records the username
+- **Timestamp**: All changes are timestamped in UTC
+
+View the complete audit log in **Administración → Auditoría**.
+
+## Troubleshooting
+
+### Import Fails with "No tiene el formato esperado"
+
+The Excel file doesn't match SAP structure. Verify:
+- Headers row contains "Series de documentos" and "Nº documento"
+- Data starts at row 2 (after headers)
+- No completely empty rows
+
+### Order Shows "No reconocida"
+
+The SAP series name doesn't match the mapping table. Check:
+- Series name in SAP export exactly matches one of: ExtruPP, Telar, Laminado, Imprenta, ConverSA, ExtruPE, ConverLI, Peletiza, VestidoM
+- No extra spaces or special characters
+- Consistent naming in SAP master data
+
+### Cannot Modify Released Order
+
+Orders in states Liberada, En producción, Pausada, Cerrada, or Cancelada only allow:
+- Status changes
+- Closure/cancellation reason updates
+
+All technical fields (quantity, product, date) are locked to maintain data integrity.
+
+## Related Topics
+
+- [Shift Logs](/guides/shift-logs) - Recording production against orders
+- [Quality Batches](/guides/quality-batches) - Tracking output batches from orders
+- [Traceability](/guides/traceability) - Following orders through the production chain

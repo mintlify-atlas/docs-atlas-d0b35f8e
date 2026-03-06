@@ -1,0 +1,549 @@
+---
+title: Conversión de Sacos (Bag Conversion)
+description: Automated cutting and sewing process that transforms printed fabric into finished industrial bags
+---
+
+## Overview
+
+Conversión de Sacos (Process ID: 5) converts printed or laminated fabric into individual sewn bags through automated cutting and bottom stitching. This process operates three convertidoras (conversion machines) producing up to 9,000 bags per shift.
+
+### Process Characteristics
+
+- **Process Type**: Order-based production
+- **Production Unit**: unidades (units/bags)
+- **Product**: Sewn polypropylene bags ready for filling
+- **Machines**: 3 convertidoras (CONV01, CONV02, CONV03)
+- **Order Pattern**: `5\d{6}` (e.g., 5000892)
+- **Production Target**: 9,000 bags per shift per machine
+- **Speed**: 35 bags/min nominal
+
+### What This Process Does
+
+The Conversión process:
+- **Receives**: Printed fabric rolls from Imprenta, laminated/natural fabric from Laminado/Telares, sewing thread
+- **Transforms**: Fabric rolls → Individual sewn bags
+- **Delivers**: Counted and bundled bag packages ready for dispatch
+- **Method**: Automatic cutting and bottom seam stitching
+
+## Production Flow
+
+### Upstream Dependencies
+
+Conversión consumes fabric rolls from:
+- **Imprenta (Process 4)**: Printed fabric (primary source)
+  - Format: `R{3-digit}-T{2-digit}-L{3-digit}-I{3-digit}`
+
+### Downstream Consumers
+
+Finished bags are **end products** (no downstream production processes).
+
+### Production Tracking Method
+
+**Unit Count Method** (`ConversionSacosContract.js:127-133`):
+
+```javascript
+reglasProduccion: {
+  metodo: 'conteo_unidades',
+  descripcion: 'Production counted in finished bags.',
+  unidad: 'unidades',
+  registroPorRollo: true,
+  registroPorCambioDeOrden: true
+}
+```
+
+## Data Structures
+
+### Key Tables
+
+#### registros_trabajo
+```javascript
+{
+  linea_ejecucion_id: FK,
+  bitacora_id: FK,
+  maquina_id: FK, // CONV01, CONV02, or CONV03
+  cantidad_producida: sacos_total,
+  merma_kg: waste,
+  parametros: JSON {
+    sacos_total: integer,
+    destino_desperdicio: 'Peletizado' | 'Descarte final',
+    observaciones: text
+  }
+}
+```
+
+#### conversion_consumo_rollo
+Roll consumption per shift:
+```javascript
+{
+  bitacora_id: FK,
+  maquina_id: FK,
+  orden_id: FK,
+  codigo_rollo: 'R047-T05-L001-I001',
+  sacos_producidos: integer,
+  lote_id: FK, // Generated per roll
+  registro_trabajo_id: FK
+}
+```
+
+#### conversion_calidad_muestras
+Quality samples (4 inspections per shift):
+```javascript
+{
+  bitacora_id: FK,
+  maquina_id: FK,
+  orden_id: FK,
+  inspeccion_indice: 1-4,
+  parametro: 'ancho_saco' | 'largo_saco' | 'doble_costura' | 'puntadas_costura',
+  valor: decimal,
+  valor_nominal: decimal,
+  resultado: 'Cumple' | 'No cumple'
+}
+```
+
+#### conversion_muestra_fisica
+Physical sample per shift (optional):
+```javascript
+{
+  bitacora_id: FK,
+  maquina_id: FK,
+  orden_id: FK,
+  ancho_muestra: decimal,
+  largo_muestra: decimal,
+  peso_muestra_gramos: decimal,
+  observaciones: text
+}
+```
+
+#### conversion_defectos
+Defect tracking from upstream processes:
+```javascript
+{
+  bitacora_id: FK,
+  maquina_id: FK,
+  orden_id: FK,
+  origen_id: 'DEF-TELAR' | 'DEF-IMPRENTA' | 'DEF-LAMINADO',
+  descripcion_defecto: text,
+  cantidad_sacos_afectados: integer
+}
+```
+
+### Lot Generation
+
+**Per-Roll Lot Creation** (`conversion.service.js:174-190`):
+
+Each converted roll generates a lot:
+```javascript
+codigo_lote = `${codigo_rollo}-C${correlativo}`
+// Example: R047-T05-L001-I001-C001
+```
+
+## Quality Parameters
+
+### Critical Parameters
+
+#### 1. Bag Width (ancho_saco)
+- **Unit**: inches
+- **Tolerance**: ±0.25 inches
+- **Nominal**: From order specification
+- **Sampling**: 4 inspections per shift
+- **Input Format**: Fractions of 1/8
+
+#### 2. Bag Length (largo_saco)
+- **Unit**: inches
+- **Tolerance**: ±0.25 inches
+- **Nominal**: From order specification
+- **Sampling**: 4 inspections per shift
+- **Input Format**: Fractions of 1/8
+
+#### 3. Bottom Fold (doble_costura)
+- **Unit**: inches
+- **Tolerance**: ±0.125 inches
+- **Nominal**: From order specification
+- **Sampling**: 4 inspections per shift
+- **Description**: Measurement of sewn bottom fold
+
+#### 4. Stitch Count (puntadas_costura)
+- **Unit**: stitches per 10 cm
+- **Range**: 12-14 stitches
+- **Nominal**: 13 stitches
+- **Sampling**: 4 inspections per shift
+- **Method**: Manual count
+
+### Sampling Frequency (`ConversionSacosContract.js:107-117`)
+
+```javascript
+frecuenciaMuestreo: {
+  muestrasMinTurno: 4,
+  distribucion: [
+    { indice: 1, momento: 'primera_inspeccion' },
+    { indice: 2, momento: 'segunda_inspeccion' },
+    { indice: 3, momento: 'tercera_inspeccion' },
+    { indice: 4, momento: 'cuarta_inspeccion' }
+  ],
+  omisionRequiereMotivo: true,
+  permiteCopiarMuestraAnterior: false
+}
+```
+
+Each inspection must measure all 4 parameters.
+
+## Business Logic
+
+### Machine Assignment Rules (`conversion.service.js:98-106`)
+
+**Critical validation** for CONV03:
+```javascript
+if (maquina.codigo === 'CONV03') {
+  const especificaciones = JSON.parse(orden.especificaciones || '{}');
+  if (especificaciones.con_fuelle === true || especificaciones.microperforado === true) {
+    throw new ValidationError('La máquina CONV#03 no está disponible para sacos con fuelle o microperforados.');
+  }
+}
+```
+
+**Machine Capabilities** (`ConversionSacosContract.js:147-151`):
+```javascript
+reglasAsignacionMaquina: {
+  'CONV01': { con_fuelle: true, microperforado: true },
+  'CONV02': { con_fuelle: true, microperforado: true },
+  'CONV03': { con_fuelle: false, microperforado: false }
+}
+```
+
+### Quality Auto-Calculation (`conversion.service.js:206-224`):
+
+```javascript
+for (const m of muestras) {
+  let resultado = 'Cumple';
+  let valorNominal = null;
+
+  if (['ancho_saco', 'largo_saco', 'doble_costura'].includes(m.parametro)) {
+    valorNominal = especificaciones[m.parametro];
+    const tolerancia = (m.parametro === 'doble_costura') ? 0.125 : 0.25;
+    if (valorNominal !== null && valorNominal !== undefined) {
+      if (Math.abs(m.valor - valorNominal) > tolerancia) {
+        resultado = 'No cumple';
+      }
+    }
+  } else if (m.parametro === 'puntadas_costura') {
+    valorNominal = 13;
+    if (m.valor < 12 || m.valor > 14) {
+      resultado = 'No cumple';
+    }
+  }
+
+  await this.conversionRepository.saveMuestraCalidad({
+    // ... save with calculated resultado
+  });
+}
+```
+
+The service calculates pass/fail based on tolerance rules.
+
+### Defect Validation (`conversion.service.js:123-133`):
+
+```javascript
+for (const d of defectos) {
+  if (!['DEF-TELAR', 'DEF-IMPRENTA', 'DEF-LAMINADO'].includes(d.origen_id)) {
+    throw new ValidationError(`Origen de defecto inválido: ${d.origen_id}`);
+  }
+  if (!d.descripcion_defecto || d.descripcion_defecto.trim().length < 10) {
+    throw new ValidationError('La descripción del defecto debe tener al menos 10 caracteres.');
+  }
+  if (!d.cantidad_sacos_afectados || d.cantidad_sacos_afectados <= 0) {
+    throw new ValidationError('La cantidad de sacos afectados debe ser mayor a 0.');
+  }
+}
+```
+
+## API Endpoints
+
+### GET `/api/conversion/resumen`
+
+Returns summary of all conversion machines:
+
+**Response**:
+```javascript
+[
+  {
+    maquina: { id: 5, nombre_visible: 'Convertidora 1' },
+    estado_proceso: 'Completo',
+    sacos_total: 9150,
+    tiene_desviacion: false
+  },
+  {
+    maquina: { id: 6, nombre_visible: 'Convertidora 2' },
+    estado_proceso: 'Parcial',
+    sacos_total: 7200,
+    tiene_desviacion: false
+  },
+  {
+    maquina: { id: 7, nombre_visible: 'Convertidora 3' },
+    estado_proceso: 'Sin datos',
+    sacos_total: 0,
+    tiene_desviacion: false
+  }
+]
+```
+
+**Implementation**: `conversion.service.js:16-35`
+
+### GET `/api/conversion/detalle/:maquinaId`
+
+Detailed data for a specific machine:
+
+**Response**:
+```javascript
+{
+  maquina: { id: 5, codigo: 'CONV01', nombre_visible: 'Convertidora 1' },
+  estado_proceso: 'Completo',
+  ultimo_registro: {
+    id: 102,
+    orden_id: 892,
+    codigo_orden: '5000892',
+    cantidad_producida: 9150,
+    merma_kg: 18.3,
+    parametros: '{ "sacos_total": 9150, "destino_desperdicio": "Peletizado" }'
+  },
+  rollos_consumidos: [
+    {
+      codigo_rollo: 'R047-T05-L001-I001',
+      sacos_producidos: 9150,
+      lote_id: 67
+    }
+  ],
+  muestras_calidad: [
+    {
+      inspeccion_indice: 1,
+      parametro: 'ancho_saco',
+      valor: 22.5,
+      valor_nominal: 22.5,
+      resultado: 'Cumple'
+    },
+    {
+      inspeccion_indice: 1,
+      parametro: 'largo_saco',
+      valor: 36.0,
+      valor_nominal: 36.0,
+      resultado: 'Cumple'
+    },
+    {
+      inspeccion_indice: 1,
+      parametro: 'doble_costura',
+      valor: 2.0,
+      valor_nominal: 2.0,
+      resultado: 'Cumple'
+    },
+    {
+      inspeccion_indice: 1,
+      parametro: 'puntadas_costura',
+      valor: 13,
+      valor_nominal: 13,
+      resultado: 'Cumple'
+    }
+    // Repeat for inspections 2, 3, 4...
+  ],
+  muestra_fisica: {
+    ancho_muestra: 22.5,
+    largo_muestra: 36.0,
+    peso_muestra_gramos: 78.4,
+    observaciones: 'Muestra representativa turno noche'
+  },
+  defectos: [
+    {
+      origen_id: 'DEF-IMPRENTA',
+      descripcion_defecto: 'Color desvanecido en zona inferior del saco',
+      cantidad_sacos_afectados: 15
+    }
+  ]
+}
+```
+
+**Implementation**: `conversion.service.js:40-63`
+
+### POST `/api/conversion/guardar`
+
+Saves shift conversion data:
+
+**Request Body**:
+```javascript
+{
+  bitacora_id: 42,
+  orden_id: 892,
+  maquina_id: 5,
+  rollos: [
+    {
+      codigo_rollo: 'R047-T05-L001-I001',
+      sacos_producidos: 9150
+    }
+  ],
+  muestras: [
+    {
+      inspeccion_indice: 1,
+      parametro: 'ancho_saco',
+      valor: 22.5
+    },
+    {
+      inspeccion_indice: 1,
+      parametro: 'largo_saco',
+      valor: 36.0
+    },
+    {
+      inspeccion_indice: 1,
+      parametro: 'doble_costura',
+      valor: 2.0
+    },
+    {
+      inspeccion_indice: 1,
+      parametro: 'puntadas_costura',
+      valor: 13
+    }
+    // Repeat for inspections 2, 3, 4...
+  ],
+  muestra_fisica: {
+    ancho_muestra: 22.5,
+    largo_muestra: 36.0,
+    peso_muestra_gramos: 78.4,
+    observaciones: 'Muestra representativa turno noche'
+  },
+  defectos: [
+    {
+      origen_id: 'DEF-IMPRENTA',
+      descripcion_defecto: 'Color desvanecido en zona inferior del saco',
+      cantidad_sacos_afectados: 15
+    }
+  ],
+  desperdicio_kg: 18.3,
+  destino_desperdicio: 'Peletizado',
+  observaciones: ''
+}
+```
+
+**Response**:
+```javascript
+{
+  registro_id: 102,
+  estado: 'Completo'
+}
+```
+
+**Transaction Flow** (`conversion.service.js:136-305`):
+1. Validate order and machine assignment rules
+2. Delete previous shift data (idempotent)
+3. Get/create `linea_ejecucion`
+4. Save `registros_trabajo` with total bags
+5. For each roll:
+   - Find or create lot: `{codigo_rollo}-C{correlativo}`
+   - Save roll consumption with lot reference
+6. Save quality samples (auto-calculate pass/fail)
+7. Save physical sample (optional)
+8. Save defects
+9. Calculate process state
+10. Update `bitacora_maquina_status`
+
+**Implementation**: `conversion.service.js:68-306`  
+**Permission Required**: `MANAGE_PRODUCTION`
+
+## Machine Status States
+
+**Calculated in**: `conversion.service.js:266-300`
+
+- **Sin datos**: No rolls, samples, defects, or waste
+- **Parcial**: Some data recorded
+- **Completo**:
+  - At least 1 roll processed
+  - 4 inspections (indices 1, 2, 3, 4)
+  - Each inspection has all 4 parameters
+- **Con desviación**: Complete but quality parameters out of tolerance
+
+**Completeness Check** (`conversion.service.js:275-291`):
+```javascript
+const indicesIndices = [...new Set(muestrasGuardadas.map(m => m.inspeccion_indice))];
+const tiene4Inspecciones = [1, 2, 3, 4].every(i => indicesIndices.includes(i));
+
+let parametrosOk = true;
+if (tiene4Inspecciones) {
+  for (let i = 1; i <= 4; i++) {
+    const paramsInspec = muestrasGuardadas.filter(m => m.inspeccion_indice === i).map(m => m.parametro);
+    const requiredParams = ['ancho_saco', 'largo_saco', 'doble_costura', 'puntadas_costura'];
+    if (!requiredParams.every(p => paramsInspec.includes(p))) {
+      parametrosOk = false;
+      break;
+    }
+  }
+}
+```
+
+## Traceability
+
+### Roll and Lot Flow
+
+```
+Imprenta produces lot: R047-T05-L001-I001
+          ↓
+Conversión consumes R047-T05-L001-I001, produces 9,150 bags
+          ↓
+Conversión generates lot: R047-T05-L001-I001-C001
+          ↓
+End product (no downstream process)
+```
+
+### Defect Origin Tracking
+
+Defects discovered during conversion are traced back to:
+- **DEF-TELAR**: Fabric defects from weaving
+- **DEF-LAMINADO**: Lamination issues
+- **DEF-IMPRENTA**: Printing defects
+
+This enables root cause analysis and upstream process improvement.
+
+## Operational Rules
+
+### Personnel Requirements (`ConversionSacosContract.js:51-55`)
+
+```javascript
+personalOperativo: {
+  minimo: 1,
+  maximo: 1,
+  reglasEspeciales: '1 persona dedicada.'
+}
+```
+
+### Stop Restrictions (`ConversionSacosContract.js:20-25`)
+
+```javascript
+restriccionesInicio: [
+  'Sin rollos de tela impresa disponibles',
+  'Falla mecánica de la convertidora',
+  'Cambio de orden en proceso',
+  'Rotura de hilo de costura'
+]
+```
+
+### Downtime Categories (`ConversionSacosContract.js:45-50`)
+
+- **Operational**: Roll change, thread threading, cut length adjustment, area cleaning
+- **Mechanical**: Servomotor failure, blade misalignment, registration photocell failure, sewing head failure
+- **Quality**: Length out of tolerance, open seam, misaligned cut, bad fold
+- **External**: Thread shortage, electrical failure, lack of printed fabric
+
+## Impact of Variability (`ConversionSacosContract.js:56-59`)
+
+```javascript
+impactoVariabilidad: [
+  {
+    condicion: 'Tela mal embobinada',
+    impacto: 'Causa paros frecuentes por desalineación en la entrada de la convertidora.'
+  },
+  {
+    condicion: 'Variación en el largo de impresión',
+    impacto: 'Dificulta el registro de corte y genera desperdicio por sacos mal cortados.'
+  }
+]
+```
+
+## Related Processes
+
+- **Upstream**: [Imprenta](/processes/imprenta) (Process 4)
+- **Related**: [Conversión Sacos Vestidos](/processes/vestidos) (Process 9) — lined bags
+- **Related**: [Production Orders](/quality/orders), [Lot Management](/quality/lots)

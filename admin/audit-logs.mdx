@@ -1,0 +1,719 @@
+---
+title: 'Audit Logs'
+description: 'Track system changes, user actions, and maintain compliance audit trails'
+icon: 'list'
+---
+
+## Overview
+
+PROD-SYS maintains comprehensive audit logs for all critical system changes, personnel actions, and data modifications. The audit system provides accountability, compliance documentation, and forensic investigation capabilities.
+
+## Audit Architecture
+
+### Database Schema
+
+**Table**: `auditoria`
+
+```sql
+CREATE TABLE auditoria (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  usuario TEXT,              -- Username who performed action
+  accion TEXT,               -- Action type (ROLE_CHANGE, UPDATE, etc.)
+  entidad TEXT,              -- Entity type (Persona, Usuario, Maquina)
+  entidad_id INTEGER,        -- ID of affected entity
+  valor_anterior TEXT,       -- Previous state (JSON)
+  valor_nuevo TEXT,          -- New state (JSON)
+  motivo_cambio TEXT,        -- Required justification
+  categoria_motivo TEXT,     -- Categorized reason (optional)
+  fecha_hora DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+**Location**: `backend/database/sqlite.js:1184-1195`
+
+### Audit Service
+
+**File**: `backend/shared/audit/AuditService.js`
+
+Centralized service for logging all auditable events:
+
+```javascript
+class AuditService {
+  async logChange(data) {
+    // Validates and records audit entry
+  }
+  
+  async logStatusChange(usuario, entidad, id, anterior, nuevo, motivo, categoria) {
+    // Specialized for state transitions
+  }
+  
+  async logUpdate(usuario, entidad, id, anterior, nuevo, motivo, categoria) {
+    // Specialized for data updates
+  }
+}
+```
+
+**Location**: `backend/shared/audit/AuditService.js:3-93`
+
+## Audited Events
+
+### System Events
+
+#### System Initialization
+
+**Action**: `SYSTEM_INITIALIZATION`
+
+**Trigger**: First-time bootstrap process
+
+**Logged Data**:
+```javascript
+{
+  usuario: 'SYSTEM_BOOTSTRAP',
+  accion: 'SYSTEM_INITIALIZATION',
+  entidad: 'Sistema',
+  entidad_id: 1,
+  valor_anterior: 'NO_INICIALIZADO',
+  valor_nuevo: 'INICIALIZADO',
+  motivo_cambio: 'Inicialización del sistema y creación del primer administrador real'
+}
+```
+
+**Location**: `backend/domains/bootstrap/bootstrap.service.js:71-79`
+
+### Personnel Events
+
+#### Status Changes
+
+**Action**: `STATUS_CHANGE`
+
+**Triggers**:
+- Employment status update (Activo → Incapacitado, Baja, etc.)
+- Absence registration
+- Automatic return from absence
+
+**Example**:
+```javascript
+{
+  usuario: 'admin',
+  accion: 'STATUS_CHANGE',
+  entidad: 'Persona',
+  entidad_id: 5,
+  valor_anterior: { estado: 'Activo' },
+  valor_nuevo: { estado: 'Incapacitado' },
+  motivo_cambio: 'Licencia médica aprobada por médico de empresa',
+  categoria_motivo: 'AJUSTE_OPERATIVO'
+}
+```
+
+**Location**: `backend/domains/personal/personal.service.js:191-192`
+
+#### Data Updates
+
+**Action**: `UPDATE`
+
+**Triggers**:
+- Personnel information changes (email, phone, area)
+- Any modification to persona record
+
+**Example**:
+```javascript
+{
+  usuario: 'admin',
+  accion: 'UPDATE',
+  entidad: 'Persona',
+  entidad_id: 5,
+  valor_anterior: {
+    email: 'old.email@company.com',
+    telefono: '123-456-7890'
+  },
+  valor_nuevo: {
+    email: 'new.email@company.com',
+    telefono: '098-765-4321'
+  },
+  motivo_cambio: 'Actualización de datos de contacto',
+  categoria_motivo: null
+}
+```
+
+**Location**: `backend/domains/personal/personal.service.js:194`
+
+#### Role Changes
+
+**Action**: `ROLE_CHANGE`
+
+**Trigger**: System role assignment
+
+**Example**:
+```javascript
+{
+  usuario: 'admin',
+  accion: 'ROLE_CHANGE',
+  entidad: 'Persona',
+  entidad_id: 5,
+  valor_anterior: { rol: 'Operario' },
+  valor_nuevo: { rol_id: 2 },  // Inspector
+  motivo_cambio: 'Promoción a Inspector de Calidad por antigüedad y desempeño',
+  es_correccion: false,
+  categoria_motivo: 'AJUSTE_OPERATIVO'
+}
+```
+
+**Location**: `backend/domains/personal/personal.service.js:255-266`
+
+#### Operational Assignments
+
+**Action**: `OPERATIONAL_ASSIGNMENT`
+
+**Trigger**: Personnel assigned to production process/machine
+
+**Example**:
+```javascript
+{
+  usuario: 'supervisor01',
+  accion: 'OPERATIONAL_ASSIGNMENT',
+  entidad: 'Persona',
+  entidad_id: 12,
+  valor_nuevo: {
+    proceso_id: 2,    // Telares
+    maquina_id: 5,    // T-05
+    turno: 'T1'
+  },
+  motivo_cambio: 'Asignación semanal turno matutino',
+  es_correccion: false
+}
+```
+
+**Location**: `backend/domains/personal/personal.service.js:339-351`
+
+### User Account Events
+
+#### Access Control Toggle
+
+**Action**: `TOGGLE_ACCESO`
+
+**Trigger**: Admin enables/disables system access
+
+**Example**:
+```javascript
+{
+  accion: 'TOGGLE_ACCESO',
+  entidad: 'Usuario',
+  entidad_id: 8,
+  realizado_por: 'admin',
+  usuario: 'admin',
+  valor_anterior: { estado_usuario: 'Activo' },
+  valor_nuevo: { estado_usuario: 'Inactivo' },
+  motivo_cambio: 'Desactivación de acceso al sistema por ausencia temporal'
+}
+```
+
+**Location**: `backend/domains/personal/personal.service.js:217-230`
+
+#### Password Reset
+
+**Action**: `PASSWORD_RESET`
+
+**Trigger**: Administrator resets user password
+
+**Example**:
+```javascript
+{
+  usuario: 'admin',
+  accion: 'PASSWORD_RESET',
+  entidad: 'Usuario',
+  entidad_id: 8,
+  motivo_cambio: 'Reset de contraseña por administrador - usuario olvidó credencial'
+}
+```
+
+**Location**: `backend/domains/personal/personal.service.js:284-290`
+
+<Info>
+  Passwords are never logged. Only the fact that a reset occurred is recorded.
+</Info>
+
+## Audit Categories
+
+### Predefined Categories
+
+**Enum**: `AuditService.CATEGORIAS`
+
+```javascript
+static CATEGORIAS = {
+  ERROR_CAPTURA: 'ERROR_CAPTURA',                  // Data entry mistakes
+  AJUSTE_OPERATIVO: 'AJUSTE_OPERATIVO',            // Operational changes
+  REACTIVACION_AUTORIZADA: 'REACTIVACION_AUTORIZADA'  // Account reactivation
+};
+```
+
+**Location**: `backend/shared/audit/AuditService.js:4-8`
+
+### Automatic Categorization
+
+The audit service automatically assigns categories based on context:
+
+```javascript
+if (!auditData.categoria_motivo) {
+  if (auditData.accion === 'REACTIVACION_USUARIO') {
+    auditData.categoria_motivo = AuditService.CATEGORIAS.REACTIVACION_AUTORIZADA;
+  } 
+  else if (auditData.accion === 'OPERATIONAL_ASSIGNMENT' || 
+           auditData.accion === 'ROL_OPERATIVO_CHANGE') {
+    auditData.categoria_motivo = AuditService.CATEGORIAS.AJUSTE_OPERATIVO;
+  } 
+  else if (auditData.es_correccion) {
+    auditData.categoria_motivo = AuditService.CATEGORIAS.ERROR_CAPTURA;
+  }
+}
+```
+
+**Location**: `backend/shared/audit/AuditService.js:22-30`
+
+### Category Validation
+
+Only predefined categories are accepted:
+
+```javascript
+if (!Object.values(AuditService.CATEGORIAS).includes(auditData.categoria_motivo)) {
+  logger.warn(`Categoría de motivo inválida detectada: ${auditData.categoria_motivo}`);
+  auditData.categoria_motivo = null;  // Ignore invalid category
+}
+```
+
+**Location**: `backend/shared/audit/AuditService.js:32-36`
+
+## Correction Tracking
+
+### Marking Corrections
+
+**Flag**: `es_correccion` (boolean)
+
+**Purpose**: Distinguish intentional changes from error corrections
+
+**Effect**:
+1. Prefixes action with `CORRECCION_`
+2. Prefixes `motivo_cambio` with `[CORRECCIÓN]`
+3. Auto-assigns `ERROR_CAPTURA` category if not specified
+
+**Implementation**:
+```javascript
+if (auditData.es_correccion) {
+  if (!auditData.motivo_cambio) {
+    throw new Error('El motivo es obligatorio para registrar una corrección');
+  }
+  
+  // Prefix action
+  if (auditData.accion && !auditData.accion.startsWith('CORRECCION_')) {
+    auditData.accion = `CORRECCION_${auditData.accion}`;
+  }
+  
+  // Prefix reason
+  if (auditData.motivo_cambio && !auditData.motivo_cambio.startsWith('[CORRECCIÓN]')) {
+    auditData.motivo_cambio = `[CORRECCIÓN] ${auditData.motivo_cambio}`;
+  }
+}
+```
+
+**Location**: `backend/shared/audit/AuditService.js:38-49`
+
+**Example Correction**:
+```javascript
+{
+  usuario: 'supervisor01',
+  accion: 'CORRECCION_UPDATE',
+  entidad: 'Persona',
+  entidad_id: 15,
+  valor_anterior: { area_id: 2 },
+  valor_nuevo: { area_id: 1 },
+  motivo_cambio: '[CORRECCIÓN] Se registró área incorrecta al momento del alta',
+  es_correccion: true,
+  categoria_motivo: 'ERROR_CAPTURA'
+}
+```
+
+## Querying Audit Logs
+
+### API Endpoint
+
+**Endpoint**: `GET /api/auditoria`
+
+**Permission**: `VIEW_AUDIT`
+
+**Allowed Roles**: Administrador, Inspector, Gerencia
+
+**Location**: `backend/shared/audit/audit.routes.js:14-26`
+
+### Query Parameters
+
+#### Filter by User
+
+```bash
+GET /api/auditoria?usuario=admin
+```
+
+**Effect**: Returns logs where `usuario` contains "admin" (partial match)
+
+#### Filter by Entity
+
+```bash
+GET /api/auditoria?entidad=Persona
+```
+
+**Effect**: Returns only logs for `Persona` entities (exact match)
+
+#### Filter by Date
+
+```bash
+GET /api/auditoria?fecha=2024-03-15
+```
+
+**Effect**: Returns logs from specific date (truncates to day)
+
+#### Combined Filters
+
+```bash
+GET /api/auditoria?usuario=supervisor&entidad=Usuario&fecha=2024-03-15
+```
+
+**Effect**: All filters applied via AND logic
+
+### Query Implementation
+
+```javascript
+async findAll({ usuario, entidad, fecha } = {}) {
+  let sql = 'SELECT * FROM auditoria WHERE 1=1';
+  const params = [];
+  
+  if (usuario) {
+    sql += ' AND usuario LIKE ?';
+    params.push(`%${usuario}%`);
+  }
+  if (entidad) {
+    sql += ' AND entidad = ?';
+    params.push(entidad);
+  }
+  if (fecha) {
+    sql += ' AND DATE(fecha_hora) = ?';
+    params.push(fecha);
+  }
+  
+  sql += ' ORDER BY fecha_hora DESC LIMIT 200';
+  return await this.db.query(sql, params);
+}
+```
+
+**Location**: `backend/shared/audit/AuditRepository.js:29-46`
+
+### Response Format
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 145,
+      "usuario": "admin",
+      "accion": "ROLE_CHANGE",
+      "entidad": "Persona",
+      "entidad_id": 5,
+      "valor_anterior": "{\"rol\":\"Operario\"}",
+      "valor_nuevo": "{\"rol_id\":2}",
+      "motivo_cambio": "Promoción a Inspector de Calidad",
+      "categoria_motivo": "AJUSTE_OPERATIVO",
+      "fecha_hora": "2024-03-15 14:23:18"
+    },
+    {
+      "id": 144,
+      "usuario": "supervisor01",
+      "accion": "UPDATE",
+      "entidad": "Persona",
+      "entidad_id": 12,
+      "valor_anterior": "{\"telefono\":\"123-456-7890\"}",
+      "valor_nuevo": "{\"telefono\":\"098-765-4321\"}",
+      "motivo_cambio": "Actualización de teléfono de contacto",
+      "categoria_motivo": null,
+      "fecha_hora": "2024-03-15 10:15:42"
+    }
+  ]
+}
+```
+
+<Info>
+  `valor_anterior` and `valor_nuevo` are stored as JSON strings. Parse them to access structured data.
+</Info>
+
+## Entity-Specific Audit Trails
+
+### Query by Entity
+
+**Method**: `findByEntity(entidad, entidad_id)`
+
+**Purpose**: Retrieve complete history for a specific record
+
+**Example**:
+```javascript
+const history = await auditRepository.findByEntity('Persona', 5);
+// Returns all audit entries for persona ID 5, newest first
+```
+
+**Location**: `backend/shared/audit/AuditRepository.js:24-27`
+
+**Use Cases**:
+- Personnel history review
+- Investigation of specific incidents
+- Compliance documentation for individual records
+
+### Implementation in Services
+
+Audit logging is embedded in business logic:
+
+```javascript
+// backend/domains/personal/personal.service.js
+
+async updateStaff(id, data, updaterId) {
+  const persona = await this.personalRepository.getPersonaById(id);
+  
+  // ... business logic ...
+  
+  await this.personalRepository.updatePersona(id, updatePayload);
+  
+  // Audit after successful update
+  if (data.estado_laboral && data.estado_laboral !== persona.estado_laboral) {
+    await this.auditService.logStatusChange(
+      updaterId, 'Persona', id, 
+      persona.estado_laboral, data.estado_laboral,
+      data.motivo_cambio || 'Cambio de estado laboral',
+      data.categoria_motivo
+    );
+  } else {
+    await this.auditService.logUpdate(
+      updaterId, 'Persona', id,
+      persona, data,
+      data.motivo_cambio || 'Actualización de datos de personal',
+      data.categoria_motivo
+    );
+  }
+}
+```
+
+**Location**: `backend/domains/personal/personal.service.js:191-195`
+
+## Audit Reliability
+
+### Non-Blocking Design
+
+**Philosophy**: Audit failures should not block business operations
+
+**Implementation**:
+```javascript
+async logChange(data) {
+  try {
+    // ... validation and insertion ...
+    await this.auditRepository.create(auditData);
+  } catch (error) {
+    // Log error but don't throw (except for validation errors)
+    logger.error('Error al registrar auditoría:', error.message);
+    
+    // Only throw if it's a business rule violation
+    if (error.message.includes('motivo') || error.message.includes('categoría')) {
+      throw error;
+    }
+    // Otherwise, audit failure is logged but operation proceeds
+  }
+}
+```
+
+**Location**: `backend/shared/audit/AuditService.js:52-59`
+
+### Required Fields
+
+**Mandatory**:
+- `usuario`: Who performed the action
+- `accion`: What action was taken
+- `entidad`: What type of entity was affected
+
+**Conditional**:
+- `motivo_cambio`: Required when `es_correccion = true`
+- `categoria_motivo`: Must be valid if provided (from closed catalog)
+
+**Optional**:
+- `entidad_id`: Specific record affected
+- `valor_anterior`: State before change
+- `valor_nuevo`: State after change
+
+## Compliance Features
+
+### Immutability
+
+Audit logs are append-only:
+
+- No UPDATE or DELETE operations on `auditoria` table
+- Timestamp auto-generated on insert
+- Primary key auto-increment (sequential)
+
+### Traceability
+
+**Who**: `usuario` field stores username
+
+**What**: `accion` field describes action type
+
+**When**: `fecha_hora` automatically timestamped
+
+**Where**: `entidad` and `entidad_id` identify affected record
+
+**Why**: `motivo_cambio` provides justification
+
+**How**: `valor_anterior` and `valor_nuevo` show delta
+
+### Data Retention
+
+**Current Implementation**: Unlimited retention
+
+**Query Limit**: 200 most recent records per query (performance protection)
+
+**Recommendations**:
+- Implement archival process for old logs (>1 year)
+- Export to long-term storage (S3, archive database)
+- Maintain indexes on `fecha_hora` for performance
+
+**Location**: `backend/shared/audit/AuditRepository.js:44`
+
+## Audit Reports
+
+### Common Queries
+
+#### User Activity Report
+
+```sql
+SELECT usuario, COUNT(*) as acciones, DATE(fecha_hora) as fecha
+FROM auditoria
+WHERE DATE(fecha_hora) >= DATE('now', '-30 days')
+GROUP BY usuario, DATE(fecha_hora)
+ORDER BY fecha DESC, acciones DESC;
+```
+
+#### Role Change History
+
+```sql
+SELECT a.*, p.nombre || ' ' || p.apellido as nombre_completo
+FROM auditoria a
+JOIN personas p ON a.entidad_id = p.id
+WHERE a.accion LIKE '%ROLE_CHANGE%'
+ORDER BY a.fecha_hora DESC;
+```
+
+#### Corrections Audit
+
+```sql
+SELECT *
+FROM auditoria
+WHERE accion LIKE 'CORRECCION_%'
+OR motivo_cambio LIKE '[CORRECCIÓN]%'
+ORDER BY fecha_hora DESC;
+```
+
+#### System State Changes
+
+```sql
+SELECT *
+FROM auditoria
+WHERE accion = 'STATUS_CHANGE'
+AND entidad = 'Persona'
+AND JSON_EXTRACT(valor_nuevo, '$.estado') = 'Baja'
+ORDER BY fecha_hora DESC;
+```
+
+#### Access Control Changes
+
+```sql
+SELECT *
+FROM auditoria
+WHERE accion IN ('TOGGLE_ACCESO', 'PASSWORD_RESET', 'REACTIVACION_USUARIO')
+ORDER BY fecha_hora DESC;
+```
+
+## Audit Best Practices
+
+### For Developers
+
+<Check>
+  - [ ] Log all state-changing operations
+  - [ ] Always include `motivo_cambio` in audit calls
+  - [ ] Use specific action types (avoid generic "UPDATE")
+  - [ ] Store before/after states for data changes
+  - [ ] Use `es_correccion` flag for error fixes
+  - [ ] Choose appropriate `categoria_motivo`
+  - [ ] Don't log sensitive data (passwords, tokens)
+  - [ ] Handle audit failures gracefully (log but don't block)
+</Check>
+
+### For Administrators
+
+<Check>
+  - [ ] Review audit logs weekly for anomalies
+  - [ ] Investigate unexpected role changes
+  - [ ] Monitor high-frequency correction actions
+  - [ ] Verify `motivo_cambio` quality in user training
+  - [ ] Export audit logs for long-term retention
+  - [ ] Ensure audit access is restricted (VIEW_AUDIT permission)
+  - [ ] Document investigation procedures
+</Check>
+
+### For Compliance
+
+<Check>
+  - [ ] Establish audit retention policy
+  - [ ] Define automated alerting for sensitive actions
+  - [ ] Require detailed justifications for corrections
+  - [ ] Perform regular audit log reviews
+  - [ ] Maintain audit trail for regulatory inspections
+  - [ ] Separate audit storage from operational database
+  - [ ] Implement audit log backups
+</Check>
+
+## Troubleshooting
+
+### Missing Audit Entries
+
+**Check**:
+1. Audit service initialization in business logic
+2. Error logs for audit failures
+3. Database write permissions
+4. Transaction rollbacks (audit may be rolled back with operation)
+
+**Solution**: Ensure `auditService.logChange()` is called after successful database operations
+
+### Performance Issues
+
+**Symptoms**: Slow queries on large audit tables
+
+**Solutions**:
+1. Add index on `fecha_hora`: `CREATE INDEX idx_audit_fecha ON auditoria(fecha_hora);`
+2. Add index on `usuario`: `CREATE INDEX idx_audit_usuario ON auditoria(usuario);`
+3. Implement archival (move old records to archive table)
+4. Increase query limit cautiously (currently 200)
+
+### Invalid Category Warnings
+
+**Log Message**: `Categoría de motivo inválida detectada: CUSTOM_CATEGORY`
+
+**Cause**: Application code passed invalid `categoria_motivo`
+
+**Solution**: 
+1. Use only predefined categories from `AuditService.CATEGORIAS`
+2. Or pass `null` to allow automatic categorization
+3. Update code to use valid enum values
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="User Management" icon="users" href="/admin/user-management">
+    Understanding audited user operations
+  </Card>
+  <Card title="Roles & Permissions" icon="shield" href="/admin/roles-permissions">
+    Who can access audit logs
+  </Card>
+  <Card title="Configuration" icon="gear" href="/admin/configuration">
+    Logging levels and settings
+  </Card>
+</CardGroup>

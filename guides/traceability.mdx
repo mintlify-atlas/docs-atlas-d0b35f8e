@@ -1,0 +1,572 @@
+---
+title: Product Traceability
+description: Complete guide to tracing products, batches, and materials through the production chain
+---
+
+Traceability in PROD-SYS provides complete visibility into product genealogy - from raw materials through finished goods. This ensures quality accountability, enables rapid recall response, and supports regulatory compliance.
+
+## Understanding Traceability
+
+Traceability answers three critical questions:
+
+1. **What went into this?** (Inputs / Genealogy)
+   - Which raw material batches were consumed
+   - Which upstream production batches were used
+   - Material suppliers and batch numbers
+
+2. **How was it made?** (Process)
+   - Production orders executed
+   - Machines and operators involved
+   - Process parameters and quality results
+   - Shifts and dates of production
+
+3. **Where did it go?** (Outputs / Usage)
+   - Which downstream products consumed this batch
+   - Customer shipments and invoice numbers
+   - Current location and status
+
+## Traceability Architecture
+
+PROD-SYS implements bidirectional traceability:
+
+```
+Raw Materials → Extrusor PP → Telares → Laminado → Imprenta → Conversión → Customer
+       ↓             ↓           ↓          ↓           ↓           ↓
+    Supplier     Lote 1     Lote 2     Lote 3      Lote 4      Lote 5
+     Batch      (pellets)   (fabric)   (laminate)  (printed)   (bags)
+```
+
+### Key Traceability Tables
+
+| Table | Purpose |
+|-------|------|
+| `lotes` | Production batch master records |
+| `consumo_lote_telar` | Fabric weaving consumption (Telares using Extrusor output) |
+| `registros_trabajo` | Production records linking orders, machines, shifts |
+| `lineas_ejecucion` | Execution context (order + process + machine) |
+| `bitacoras` | Shift logs capturing time and operator context |
+| `muestras` | Quality test results by batch |
+| `historial_estado_lote` | Batch status changes and approvals |
+
+## Tracing a Batch
+
+Navigate to **Control → Trazabilidad**.
+
+<Steps>
+  <Step title="Enter Batch Code">
+    Input the código_lote you want to trace:
+    - Standard format: `{codigo_orden}-{correlativo}` (e.g., "2000145-001")
+    - Laminado format: `{codigo_rollo}-L{correlativo}` (e.g., "2000145-001-L1")
+    - Product serial numbers (future enhancement)
+  </Step>
+  
+  <Step title="Execute Query">
+    Click **Consultar Historia**. The system queries:
+    ```javascript
+    GET /api/lotes/:id/trazabilidad
+    ```
+  </Step>
+  
+  <Step title="View Complete Chain">
+    The traceability view displays:
+    
+    **Batch Details**
+    - Código_lote and internal ID
+    - Production order (codigo_orden)
+    - Source process
+    - Production date and shift
+    - Current status (activo, pausado, cerrado)
+    
+    **Upstream Genealogy (Inputs)**
+    - Raw material batches consumed
+    - Supplier information
+    - Material specifications
+    - Receiving dates and quantities
+    
+    **Production Context**
+    - Machine used (from linea_ejecucion)
+    - Operator and inspector (from bitacora)
+    - Process parameters recorded
+    - Quality test results (from muestras)
+    
+    **Downstream Usage (Outputs)**
+    - Which batches consumed this material
+    - Destination orders and processes
+    - Quantities used by shift
+    - Customer shipments (future)
+    
+    **Status History**
+    - All status transitions
+    - Approval timestamps
+    - Comments and justifications
+    - User attribution
+  </Step>
+</Steps>
+
+## Process-Specific Traceability
+
+### Extrusor PP (Process 1)
+
+**Inputs tracked**:
+- Raw polymer batches (supplier + batch number)
+- Additives and colorants (from mezcla data)
+- Recycled material (regrind %)
+
+**Production data**:
+- Extruder machine ID
+- Barrel temperature zones (T1-T6)
+- Screw RPM and pressure
+- Output rate (kg/hr)
+- Melt flow index (MFI) from quality samples
+
+**Outputs**:
+- Pellet batches (lote codes)
+- Weight per batch
+- Packaging (bulk bags, gaylords)
+
+### Telares (Process 2)
+
+**Inputs tracked**:
+- Extrusor PP batches consumed (via consumo_lote_telar)
+- Yarn specifications
+- Loom setup parameters
+
+**Production data**:
+- Weaving machine (T-01, T-02, etc.)
+- Fabric width (ancho cm)
+- Linear meters produced
+- Operator per shift
+- Resistance and weight tests
+
+**Outputs**:
+- Fabric roll batches (lote codes)
+- Roll length and weight
+- Quality grade
+
+### Laminado (Process 3)
+
+**Inputs tracked**:
+- Telares fabric rolls (input lote codes)
+- Lamination film supplier and batch
+- Adhesive batch number
+
+**Production data**:
+- Lamination machine
+- Temperature and speed settings
+- Bond strength (from quality samples)
+- Linear meters laminated
+
+**Outputs**:
+- Laminated roll batches (format: {input}-L{correlativo})
+- Roll dimensions
+- Peel strength test results
+
+### Imprenta (Process 4)
+
+**Inputs tracked**:
+- Laminado rolls consumed
+- Ink batch numbers by color
+- Print plate identification
+
+**Production data**:
+- Printing press ID
+- Print registration (mm)
+- Color density readings
+- Print count (thousands)
+
+**Outputs**:
+- Printed material batches
+- Customer artwork version
+- Color proofing results
+
+### Conversión (Processes 5, 7, 9)
+
+**Inputs tracked**:
+- Printed material batches (from Imprenta)
+- Accessory components (handles, valves, zippers)
+- Thread/stitching material batches
+
+**Production data**:
+- Converting/sewing machines
+- Cutting die identification
+- Stitch density and strength
+- Unit count produced
+
+**Outputs**:
+- Finished goods batches
+- Packaging configuration (units per box/pallet)
+- Customer order linkage
+
+## Traceability Queries
+
+### Forward Trace (Where Did It Go?)
+
+Starting from a raw material or intermediate batch, find all downstream products:
+
+<Steps>
+  <Step title="Start with Source Batch">
+    Enter the early-stage batch code (e.g., Extrusor PP batch "1000234-001").
+  </Step>
+  
+  <Step title="Query Consumption Records">
+    The system searches consumo_lote tables:
+    ```sql
+    SELECT * FROM consumo_lote_telar WHERE lote_id = ?
+    ```
+  </Step>
+  
+  <Step title="Follow to Next Process">
+    For each consumption record:
+    - Find the registro_trabajo_id
+    - Get the linea_ejecucion (order + process + machine)
+    - Identify output batches from that registro
+  </Step>
+  
+  <Step title="Recurse Downstream">
+    Repeat for each output batch until reaching finished goods or customer shipments.
+  </Step>
+  
+  <Step title="Display Tree View">
+    Show hierarchical tree:
+    ```
+    1000234-001 (Extrusor PP, 5000 kg)
+    ├─ 2000145-001 (Telares, 18000 m², T-03)
+    │  ├─ 3000567-001-L1 (Laminado, 8000 m², LAM-01)
+    │  │  └─ 4000789-001 (Imprenta, 400 MIL, IMP-02)
+    │  │     └─ 5001234-001 (Conversión, 20000 UND, CONV-03)
+    │  │        └─ Shipment SO-98765 (15000 units to Customer ABC)
+    │  └─ 3000567-001-L2 (Laminado, 9500 m², LAM-01)
+    └─ 2000145-002 (Telares, 17500 m², T-05)
+    ```
+  </Step>
+</Steps>
+
+### Backward Trace (Where Did It Come From?)
+
+Starting from a finished product, find all source materials:
+
+<Steps>
+  <Step title="Start with Finished Goods">
+    Enter the final batch code (e.g., "5001234-001" - finished bags).
+  </Step>
+  
+  <Step title="Find Source Order">
+    Get orden_produccion_id and bitacora_id from lote.
+  </Step>
+  
+  <Step title="Query Input Consumption">
+    Find what this order consumed:
+    ```sql
+    SELECT * FROM consumo_lote_telar 
+    WHERE registro_trabajo_id IN (
+      SELECT id FROM registros_trabajo WHERE bitacora_id = ?
+    )
+    ```
+  </Step>
+  
+  <Step title="Recurse Upstream">
+    For each input batch, repeat the query to find its sources.
+  </Step>
+  
+  <Step title="Display Reverse Tree">
+    Show inverted hierarchy:
+    ```
+    5001234-001 (Conversión, Bags, 20000 UND)
+    └─ 4000789-001 (Imprenta, Printed, 400 MIL)
+       └─ 3000567-001-L1 (Laminado, Laminate, 8000 m²)
+          └─ 2000145-001 (Telares, Fabric, 18000 m²)
+             └─ 1000234-001 (Extrusor PP, Pellets, 5000 kg)
+                ├─ Supplier: Polymer Corp, Batch PC-45678
+                ├─ Additive: UV Stabilizer, Batch UV-2345
+                └─ Colorant: Blue Masterbatch, Batch MB-8901
+    ```
+  </Step>
+</Steps>
+
+## Quality Integration
+
+Traceability includes complete quality context:
+
+### Quality Samples
+
+For each batch, view linked quality samples:
+
+```javascript
+{
+  lote: "2000145-001",
+  muestras: [
+    {
+      parametro: "Ancho",
+      valor: 105.2,
+      unidad: "cm",
+      resultado: "Cumple",
+      especificacion_min: 100,
+      especificacion_max: 110,
+      fecha_analisis: "2024-01-25T10:30:00Z",
+      analista: "qc_user1"
+    },
+    {
+      parametro: "Resistencia",
+      valor: 485,
+      unidad: "N",
+      resultado: "Cumple",
+      especificacion_min: 450,
+      fecha_analisis: "2024-01-25T10:35:00Z",
+      analista: "qc_user1"
+    }
+  ]
+}
+```
+
+### Rejected Batches
+
+If quality samples show rejections:
+- Batch status changes to "pausado"
+- Historial records rejection reason
+- Downstream usage is blocked
+- Traceability query highlights the rejection:
+  - Shows rejection timestamp
+  - Links to corrective action (if documented)
+  - Indicates disposition (rework, scrap, conditional release)
+
+## Recall Simulation
+
+In a recall scenario:
+
+<Steps>
+  <Step title="Identify Problem Batch">
+    Customer reports issue, provides batch code or shipment number.
+  </Step>
+  
+  <Step title="Backward Trace to Root Cause">
+    Query backward to identify all source materials and processes involved.
+  </Step>
+  
+  <Step title="Identify Potentially Affected Batches">
+    If root cause is a specific raw material batch:
+    - Find all production runs using that material
+    - Query forward from that batch to all finished goods
+  </Step>
+  
+  <Step title="Generate Recall List">
+    System produces:
+    - All finished goods batches affected
+    - Customer shipments containing those batches
+    - Quantities by customer and shipment date
+    - Current inventory locations
+  </Step>
+  
+  <Step title="Update Status">
+    Change affected batch status to "pausado" with recall comment:
+    ```
+    RECALL ALERT: Lote asociado a material defectuoso.
+    Batch de polímero PC-45678 contaminado con humedad excesiva.
+    Todos los productos derivados deben ser retenidos e inspeccionados.
+    Contactar a Quality Manager antes de disposición.
+    ```
+  </Step>
+  
+  <Step title="Isolate and Disposition">
+    - Hold all affected inventory
+    - Inspect finished goods
+    - Determine rework feasibility
+    - Scrap if necessary
+    - Document all actions in audit trail
+  </Step>
+</Steps>
+
+## Audit Trail Integration
+
+Every traceability record has audit context:
+
+### Who, What, When
+
+- **Production**: Username from bitacora.inspector or registro_trabajo.usuario_modificacion
+- **Quality**: Username from muestras.usuario_modificacion
+- **Status changes**: Username from historial_estado_lote.changed_by
+- **Timestamps**: All operations recorded in UTC
+
+### Viewing Audit Details
+
+In traceability view:
+- Click on any batch or production record
+- View "Audit Trail" tab
+- See all CRUD operations:
+  - CREATE: Initial batch generation
+  - UPDATE: Data corrections or additions
+  - STATUS_CHANGE: Quality approvals or holds
+  - DELETE: (Not allowed - soft deletes only)
+
+## Material Balance Verification
+
+Use traceability to validate material usage:
+
+<Steps>
+  <Step title="Select Time Period">
+    Choose date range (e.g., weekly, monthly).
+  </Step>
+  
+  <Step title="Query Production by Process">
+    For each process:
+    - Sum all output quantities (from registros_trabajo.cantidad_producida)
+    - Sum all input consumption (from consumo_lote tables)
+  </Step>
+  
+  <Step title="Calculate Material Efficiency">
+    ```
+    Efficiency % = (Output Quantity / Input Quantity) × 100
+    Waste % = 100 - Efficiency %
+    ```
+    
+    Compare to:
+    - Expected yield (from process specifications)
+    - Reported waste (from registros_trabajo.merma_kg)
+  </Step>
+  
+  <Step title="Investigate Variances">
+    If efficiency is below target:
+    - Drill into specific batches
+    - Review quality rejections
+    - Check for unreported waste
+    - Identify process improvement opportunities
+  </Step>
+</Steps>
+
+## Traceability Reports
+
+### Batch Genealogy Report
+
+For regulatory compliance, generate PDF report:
+
+```
+BATCH GENEALOGY REPORT
+
+Finished Product: Batch 5001234-001
+Customer: ABC Corporation
+Shipment: SO-98765, Shipped 2024-01-28
+Quantity: 15,000 units (Bags, 50kg capacity)
+
+--- PRODUCTION HISTORY ---
+
+1. Conversión (Process 5)
+   Machine: CONV-03
+   Shift: T1, 2024-01-27
+   Operator: operator5
+   Quantity: 20,000 UND
+   Quality: All samples pass
+   
+   Inputs:
+   - Batch 4000789-001 (Printed Material, 400 MIL)
+   - Thread: Supplier ThreadCo, Batch THR-5678
+   - Handles: Supplier HandleInc, Batch HDL-3456
+
+2. Imprenta (Process 4)
+   Machine: IMP-02
+   Shift: T2, 2024-01-26
+   Operator: operator7
+   Quantity: 400 MIL (thousand impressions)
+   Quality: Color density OK, Registration ±0.5mm
+   
+   Inputs:
+   - Batch 3000567-001-L1 (Laminated Roll, 8000 m²)
+   - Inks: Cyan INK-C-1234, Magenta INK-M-2345, Yellow INK-Y-3456, Black INK-K-4567
+
+[... continued for each upstream process ...]
+
+--- RAW MATERIALS ---
+
+Polymer: Supplier Polymer Corp, Batch PC-45678
+  Received: 2024-01-10
+  COA: Certificate PC-45678-COA
+  Specs: MFI 12±2, Density 0.905 g/cm³
+
+UV Stabilizer: Supplier Additives Inc, Batch UV-2345
+  Received: 2024-01-08
+  COA: UV-2345-COA
+
+Colorant: Supplier MasterBatch Ltd, Batch MB-8901
+  Received: 2024-01-05
+  COA: MB-8901-COA
+
+--- QUALITY SUMMARY ---
+
+All processes: Quality samples within specification
+No rejections or holds
+No deviations or incidents
+
+--- CERTIFICATION ---
+
+This report certifies complete traceability from raw materials
+to finished goods for the above batch.
+
+Generated: 2024-01-30 10:45:00 UTC
+Generated by: quality_manager1
+```
+
+## Best Practices
+
+<Check>Record batch consumption immediately during production, not retrospectively</Check>
+<Check>Validate traceability chains before customer shipments</Check>
+<Check>Maintain consistent batch numbering across all processes</Check>
+<Check>Link quality samples to batches, not just orders</Check>
+<Check>Document all batch status changes with detailed comments</Check>
+<Check>Perform periodic material balance audits to validate traceability</Check>
+<Check>Test recall procedures quarterly with simulated scenarios</Check>
+
+<Warning>Gaps in traceability (missing consumption records) break the chain and prevent effective recall.</Warning>
+
+## Troubleshooting
+
+### Batch Shows No Inputs
+
+**Issue**: Forward trace finds batch but no source materials
+
+- Consumption may not have been recorded during production
+- Check if process contract supports consumption tracking
+- Review shift log to verify production was recorded correctly
+- Add missing consumo_lote records if data is available
+
+### Batch Shows No Outputs
+
+**Issue**: Backward trace shows batch created but never consumed
+
+- Batch may still be in inventory (not yet used)
+- Could indicate production planning issue (excess inventory)
+- Verify batch estado (may be pausado or cerrado)
+- Check if downstream process is active
+
+### Material Balance Doesn't Match
+
+**Issue**: Input quantities don't align with output quantities
+
+- Check for unreported waste (merma_kg in registros_trabajo)
+- Verify unit conversions (kg vs. m² vs. MIL vs. UND)
+- Look for quality rejections that removed material from production
+- Investigate data entry errors in cantidad_producida
+
+### Traceability Query Times Out
+
+**Issue**: Large traceability chains cause slow queries
+
+- Optimize database indexes on lote_id, registro_trabajo_id
+- Limit tree depth (e.g., 5 levels max)
+- Cache frequently accessed genealogies
+- Use asynchronous query with progress indicator
+
+## Future Enhancements
+
+Planned traceability improvements:
+
+1. **Graphical Genealogy View**: Interactive tree/graph visualization
+2. **Customer Shipment Integration**: Link batches to invoices and shipping docs
+3. **Material Certificates**: Attach supplier COAs and test reports to batches
+4. **Barcode/QR Integration**: Scan batch labels to query traceability
+5. **Real-Time Alerts**: Notify when related batches are held or recalled
+6. **Blockchain Pilot**: Immutable traceability records for export customers
+
+## Related Topics
+
+- [Quality Batches](/guides/quality-batches) - Managing batch lifecycle and status
+- [Shift Logs](/guides/shift-logs) - Recording production that generates traceability
+- [Production Orders](/guides/production-orders) - Orders that batches fulfill
+- [Incidents](/guides/incidents) - Tracking quality issues by batch

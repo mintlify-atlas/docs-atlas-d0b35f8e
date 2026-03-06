@@ -1,0 +1,1376 @@
+---
+title: 'Personnel Management'
+description: 'Complete API reference for managing personnel, staff profiles, roles, and operational assignments'
+---
+
+# Personnel Management API
+
+The Personnel API provides comprehensive endpoints for managing staff members, including registration, profile updates, role assignments, operational assignments, and access control. This module enforces labor status validation, tracks absence history, and maintains full audit trails for all personnel changes.
+
+## Permissions
+
+All personnel endpoints require authentication and specific permissions:
+
+- **VIEW_STAFF** - Required for viewing personnel data
+- **MANAGE_STAFF** - Required for creating, updating, and managing staff
+- **ASSIGN_OPERATIONS** - Required for assigning personnel to operational tasks
+
+---
+
+## Get All Staff
+
+<CodeGroup>
+```bash cURL
+curl -X GET https://api.prod-sys.com/api/personal \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```javascript JavaScript
+const response = await fetch('https://api.prod-sys.com/api/personal', {
+  headers: {
+    'Authorization': 'Bearer YOUR_TOKEN'
+  }
+});
+const data = await response.json();
+```
+</CodeGroup>
+
+<RequestExample>
+```bash Request
+GET /api/personal
+```
+</RequestExample>
+
+<ResponseExample>
+```json Response
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "nombre": "Juan",
+      "apellido": "Pérez",
+      "codigo_interno": "EMP001",
+      "area_id": 2,
+      "area_nombre": "Producción",
+      "email": "juan.perez@prod-sys.com",
+      "telefono": "+52-555-1234",
+      "fecha_ingreso": "2024-01-15",
+      "rol_organizacional": "Técnico de Línea",
+      "estado_laboral": "Activo",
+      "rol_actual": "Operario",
+      "username": "EMP001",
+      "estado_usuario": "Activo",
+      "estado_efectivo": "Activo",
+      "ausencia_vencida": false,
+      "es_auxiliar_activo": false,
+      "created_at": "2024-01-15T10:30:00Z",
+      "updated_at": "2024-01-15T10:30:00Z"
+    }
+  ]
+}
+```
+</ResponseExample>
+
+### Authorization
+**Required Permission:** `VIEW_STAFF`
+
+### Response Schema
+
+Returns an enriched list of all personnel with computed state information:
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if the request was successful
+</ResponseField>
+
+<ResponseField name="data" type="array" required>
+  Array of personnel objects
+  
+  <ResponseField name="id" type="integer">
+    Unique personnel identifier
+  </ResponseField>
+  
+  <ResponseField name="nombre" type="string">
+    First name
+  </ResponseField>
+  
+  <ResponseField name="apellido" type="string">
+    Last name
+  </ResponseField>
+  
+  <ResponseField name="codigo_interno" type="string">
+    Internal employee code (also used as username)
+  </ResponseField>
+  
+  <ResponseField name="area_id" type="integer">
+    Foreign key to areas table
+  </ResponseField>
+  
+  <ResponseField name="area_nombre" type="string">
+    Area name (e.g., "Producción", "Administración")
+  </ResponseField>
+  
+  <ResponseField name="email" type="string" nullable>
+    Email address
+  </ResponseField>
+  
+  <ResponseField name="telefono" type="string" nullable>
+    Phone number
+  </ResponseField>
+  
+  <ResponseField name="fecha_ingreso" type="string" nullable>
+    Date of hire (YYYY-MM-DD format)
+  </ResponseField>
+  
+  <ResponseField name="rol_organizacional" type="string">
+    Organizational role title
+  </ResponseField>
+  
+  <ResponseField name="estado_laboral" type="string">
+    Current labor status. One of: `Activo`, `Incapacitado`, `Inactivo`, `Baja`
+  </ResponseField>
+  
+  <ResponseField name="rol_actual" type="string" nullable>
+    Current system role name
+  </ResponseField>
+  
+  <ResponseField name="username" type="string" nullable>
+    Login username (same as codigo_interno)
+  </ResponseField>
+  
+  <ResponseField name="estado_usuario" type="string" nullable>
+    User account status: `Activo` or `Inactivo`
+  </ResponseField>
+  
+  <ResponseField name="estado_efectivo" type="string">
+    Computed effective status. Automatically reverts to `Activo` if absence period has expired
+  </ResponseField>
+  
+  <ResponseField name="ausencia_vencida" type="boolean">
+    Indicates if the absence period has expired and auto-reactivation occurred
+  </ResponseField>
+  
+  <ResponseField name="es_auxiliar_activo" type="boolean">
+    Whether this person is an active auxiliary (Auxiliar operational role + Activo state)
+  </ResponseField>
+  
+  <ResponseField name="ausencia_desde" type="string" nullable>
+    Start date of current absence (YYYY-MM-DD)
+  </ResponseField>
+  
+  <ResponseField name="ausencia_hasta" type="string" nullable>
+    End date of current absence (YYYY-MM-DD)
+  </ResponseField>
+  
+  <ResponseField name="tipo_ausencia" type="string" nullable>
+    Type of absence: `Incapacidad` or `Permiso`
+  </ResponseField>
+  
+  <ResponseField name="motivo_ausencia" type="string" nullable>
+    Reason for absence
+  </ResponseField>
+</ResponseField>
+
+### Business Logic
+
+- **Auto-Reactivation**: Staff with expired absence periods (`ausencia_hasta` < today) are automatically transitioned back to `Activo` status
+- **State Enrichment**: The response includes both `estado_laboral` (stored) and `estado_efectivo` (computed)
+- **Audit Trail**: Auto-reactivations are logged with reason `"Retorno automático por vencimiento de ausencia"`
+
+---
+
+## Get Staff Details
+
+<CodeGroup>
+```bash cURL
+curl -X GET https://api.prod-sys.com/api/personal/1 \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```javascript JavaScript
+const response = await fetch('https://api.prod-sys.com/api/personal/1', {
+  headers: {
+    'Authorization': 'Bearer YOUR_TOKEN'
+  }
+});
+const data = await response.json();
+```
+</CodeGroup>
+
+<RequestExample>
+```bash Request
+GET /api/personal/:id
+```
+</RequestExample>
+
+<ResponseExample>
+```json Response
+{
+  "success": true,
+  "data": {
+    "id": 1,
+    "nombre": "Juan",
+    "apellido": "Pérez",
+    "codigo_interno": "EMP001",
+    "area_nombre": "Producción",
+    "email": "juan.perez@prod-sys.com",
+    "telefono": "+52-555-1234",
+    "fecha_ingreso": "2024-01-15",
+    "rol_organizacional": "Técnico de Línea",
+    "estado_laboral": "Activo",
+    "estado_efectivo": "Activo",
+    "rol_actual": "Operario",
+    "username": "EMP001",
+    "estado_usuario": "Activo",
+    "historial_roles": [
+      {
+        "id": 5,
+        "persona_id": 1,
+        "rol_id": 3,
+        "rol_nombre": "Operario",
+        "asignado_por": 2,
+        "asignado_por_nombre": "María López",
+        "motivo_cambio": "Registro inicial de personal y usuario",
+        "fecha_asignacion": "2024-01-15T10:30:00Z",
+        "activo": 1
+      }
+    ],
+    "asignaciones_activas": [
+      {
+        "id": 12,
+        "persona_id": 1,
+        "proceso_id": 101,
+        "proceso_nombre": "Ensamble Final",
+        "maquina_id": 7,
+        "maquina_codigo": "MAQ-007",
+        "turno": "T1",
+        "permanente": false,
+        "fecha_inicio": "2024-03-01T08:00:00Z",
+        "fecha_fin": null,
+        "created_by": 2
+      }
+    ],
+    "rol_operativo_actual": {
+      "id": 8,
+      "persona_id": 1,
+      "rol_operativo_id": 2,
+      "rol_nombre": "Operador Especializado",
+      "fecha_desde": "2024-02-01T00:00:00Z",
+      "fecha_hasta": null,
+      "motivo": "Promoción por desempeño",
+      "asignado_por": 2
+    },
+    "historial_grupos": [
+      {
+        "id": 3,
+        "grupo_id": 1,
+        "grupo_nombre": "Grupo A - Turno 1",
+        "persona_id": 1,
+        "fecha_desde": "2024-01-20T00:00:00Z",
+        "fecha_hasta": null,
+        "motivo": "Asignación operativa estándar",
+        "asignado_por": 2
+      }
+    ],
+    "historial_ausencias": [
+      {
+        "id": 1,
+        "persona_id": 1,
+        "estado_laboral": "Incapacitado",
+        "tipo_ausencia": "Incapacidad",
+        "ausencia_desde": "2024-02-10",
+        "ausencia_hasta": "2024-02-15",
+        "motivo_ausencia": "Incapacidad médica temporal",
+        "registrado_por": 2,
+        "fecha_registro": "2024-02-10T09:00:00Z"
+      }
+    ]
+  }
+}
+```
+</ResponseExample>
+
+### Parameters
+
+<ParamField path="id" type="integer" required>
+  Personnel ID
+</ParamField>
+
+### Authorization
+**Required Permission:** `VIEW_STAFF`
+
+### Response Schema
+
+Returns comprehensive personnel details including all related history:
+
+<ResponseField name="success" type="boolean" required>
+  Request success indicator
+</ResponseField>
+
+<ResponseField name="data" type="object" required>
+  Detailed personnel information
+  
+  <ResponseField name="historial_roles" type="array">
+    Complete history of system role assignments
+  </ResponseField>
+  
+  <ResponseField name="asignaciones_activas" type="array">
+    Active operational assignments (process + machine assignments)
+  </ResponseField>
+  
+  <ResponseField name="rol_operativo_actual" type="object" nullable>
+    Current operational role (e.g., "Operador Especializado", "Auxiliar")
+  </ResponseField>
+  
+  <ResponseField name="historial_grupos" type="array">
+    History of group memberships
+  </ResponseField>
+  
+  <ResponseField name="historial_ausencias" type="array">
+    Complete absence history with reasons and dates
+  </ResponseField>
+</ResponseField>
+
+---
+
+## Register Staff
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.prod-sys.com/api/personal \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "nombre": "Ana",
+    "apellido": "García",
+    "codigo_interno": "EMP015",
+    "area_id": 2,
+    "email": "ana.garcia@prod-sys.com",
+    "telefono": "+52-555-5678",
+    "fecha_ingreso": "2024-03-01",
+    "rol_organizacional": "Operador de Máquina"
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('https://api.prod-sys.com/api/personal', {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Bearer YOUR_TOKEN',
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    nombre: 'Ana',
+    apellido: 'García',
+    codigo_interno: 'EMP015',
+    area_id: 2,
+    email: 'ana.garcia@prod-sys.com',
+    telefono: '+52-555-5678',
+    fecha_ingreso: '2024-03-01',
+    rol_organizacional: 'Operador de Máquina'
+  })
+});
+const data = await response.json();
+```
+</CodeGroup>
+
+<RequestExample>
+```json Request Body
+{
+  "nombre": "Ana",
+  "apellido": "García",
+  "codigo_interno": "EMP015",
+  "area_id": 2,
+  "email": "ana.garcia@prod-sys.com",
+  "telefono": "+52-555-5678",
+  "fecha_ingreso": "2024-03-01",
+  "rol_organizacional": "Operador de Máquina"
+}
+```
+</RequestExample>
+
+<ResponseExample>
+```json Response
+{
+  "success": true,
+  "data": {
+    "id": 15,
+    "tempPassword": "x9k2m5p8"
+  },
+  "message": "Personal registrado correctamente. Se ha generado una contraseña temporal."
+}
+```
+</ResponseExample>
+
+### Authorization
+**Required Permission:** `MANAGE_STAFF`
+
+### Request Body
+
+<ParamField body="nombre" type="string" required>
+  First name (minimum 1 character)
+</ParamField>
+
+<ParamField body="apellido" type="string" required>
+  Last name (minimum 1 character)
+</ParamField>
+
+<ParamField body="codigo_interno" type="string" required>
+  Unique internal employee code. Will be used as the username. Must not already exist in the system.
+</ParamField>
+
+<ParamField body="area_id" type="integer" required>
+  Area ID (must be a valid area from the areas catalog)
+</ParamField>
+
+<ParamField body="email" type="string" optional>
+  Email address. Must be unique if provided.
+</ParamField>
+
+<ParamField body="telefono" type="string" optional>
+  Phone number
+</ParamField>
+
+<ParamField body="fecha_ingreso" type="string" optional>
+  Date of hire in YYYY-MM-DD format
+</ParamField>
+
+<ParamField body="rol_organizacional" type="string" required>
+  Organizational role title (minimum 1 character)
+</ParamField>
+
+### Response Schema
+
+<ResponseField name="success" type="boolean" required>
+  Request success indicator
+</ResponseField>
+
+<ResponseField name="data" type="object" required>
+  <ResponseField name="id" type="integer">
+    ID of the newly created personnel record
+  </ResponseField>
+  
+  <ResponseField name="tempPassword" type="string">
+    Temporary password generated for the user account. In production, this should be sent via secure email only.
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Success message
+</ResponseField>
+
+### Business Logic
+
+1. **Uniqueness Validation**: The system validates that both `codigo_interno` and `email` are unique
+2. **Automatic User Account**: A user account is automatically created with:
+   - Username = `codigo_interno`
+   - Auto-generated temporary password (8 characters)
+   - Default role: "Operario" (or first available role)
+   - `must_change_password` flag set to `true`
+3. **Transaction Safety**: The entire operation runs within a database transaction
+4. **Audit Trail**: Creation is logged with reason "Registro inicial de personal y usuario"
+5. **Password Security**: Passwords are hashed using bcrypt with 10 rounds
+
+<Warning>
+  In production environments, the temporary password should only be sent via secure email. The password is included in the response for development purposes only.
+</Warning>
+
+### Error Responses
+
+<CodeGroup>
+```json Duplicate Code
+{
+  "success": false,
+  "error": "El código interno ya está registrado"
+}
+```
+
+```json Duplicate Email
+{
+  "success": false,
+  "error": "El email ya está registrado"
+}
+```
+
+```json Validation Error
+{
+  "success": false,
+  "error": "El nombre es obligatorio. El código interno es obligatorio."
+}
+```
+</CodeGroup>
+
+---
+
+## Update Staff
+
+<CodeGroup>
+```bash cURL
+curl -X PUT https://api.prod-sys.com/api/personal/15 \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "telefono": "+52-555-9999",
+    "estado_laboral": "Incapacitado",
+    "ausencia_desde": "2024-03-15",
+    "ausencia_hasta": "2024-03-22",
+    "tipo_ausencia": "Incapacidad",
+    "motivo_ausencia": "Incapacidad médica por cirugía menor",
+    "motivo_cambio": "Actualización de estado por incapacidad médica"
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('https://api.prod-sys.com/api/personal/15', {
+  method: 'PUT',
+  headers: {
+    'Authorization': 'Bearer YOUR_TOKEN',
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    telefono: '+52-555-9999',
+    estado_laboral: 'Incapacitado',
+    ausencia_desde: '2024-03-15',
+    ausencia_hasta: '2024-03-22',
+    tipo_ausencia: 'Incapacidad',
+    motivo_ausencia: 'Incapacidad médica por cirugía menor',
+    motivo_cambio: 'Actualización de estado por incapacidad médica'
+  })
+});
+const data = await response.json();
+```
+</CodeGroup>
+
+<RequestExample>
+```json Request Body
+{
+  "telefono": "+52-555-9999",
+  "estado_laboral": "Incapacitado",
+  "ausencia_desde": "2024-03-15",
+  "ausencia_hasta": "2024-03-22",
+  "tipo_ausencia": "Incapacidad",
+  "motivo_ausencia": "Incapacidad médica por cirugía menor",
+  "motivo_cambio": "Actualización de estado por incapacidad médica"
+}
+```
+</RequestExample>
+
+<ResponseExample>
+```json Response
+{
+  "success": true,
+  "message": "Personal actualizado correctamente."
+}
+```
+</ResponseExample>
+
+### Parameters
+
+<ParamField path="id" type="integer" required>
+  Personnel ID to update
+</ParamField>
+
+### Authorization
+**Required Permission:** `MANAGE_STAFF`
+
+### Request Body (All fields optional)
+
+<ParamField body="nombre" type="string" optional>
+  First name
+</ParamField>
+
+<ParamField body="apellido" type="string" optional>
+  Last name
+</ParamField>
+
+<ParamField body="email" type="string" optional>
+  Email address
+</ParamField>
+
+<ParamField body="telefono" type="string" optional>
+  Phone number
+</ParamField>
+
+<ParamField body="area_id" type="integer" optional>
+  Area ID
+</ParamField>
+
+<ParamField body="rol_organizacional" type="string" optional>
+  Organizational role title
+</ParamField>
+
+<ParamField body="estado_laboral" type="string" optional>
+  Labor status. One of: `Activo`, `Incapacitado`, `Inactivo`, `Baja`
+</ParamField>
+
+<ParamField body="ausencia_desde" type="string" optional>
+  Start date of absence (YYYY-MM-DD). Required when estado_laboral is `Incapacitado`, `Inactivo`, or `Baja`
+</ParamField>
+
+<ParamField body="ausencia_hasta" type="string" optional>
+  End date of absence (YYYY-MM-DD). Required for `Incapacitado` and `Inactivo`. Must be null for `Baja`
+</ParamField>
+
+<ParamField body="tipo_ausencia" type="string" optional>
+  Type of absence: `Incapacidad` or `Permiso`. Must match estado_laboral constraints
+</ParamField>
+
+<ParamField body="motivo_ausencia" type="string" optional>
+  Reason for absence (minimum 5 characters). Required for all non-Activo states
+</ParamField>
+
+<ParamField body="motivo_cambio" type="string" required>
+  Reason for the update (minimum 5 characters). Required for audit trail
+</ParamField>
+
+<ParamField body="categoria_motivo" type="string" optional>
+  Category of the change reason for audit classification
+</ParamField>
+
+### Business Logic
+
+#### Terminal State Protection
+- Staff with `estado_laboral = "Baja"` **cannot be modified**. Returns error: "Estado terminal: No se pueden realizar cambios en un colaborador dado de Baja"
+
+#### Estado Laboral Rules
+
+**Incapacitado:**
+- Requires: `ausencia_desde`, `ausencia_hasta`, `tipo_ausencia = "Incapacidad"`, `motivo_ausencia`
+- System validates that tipo_ausencia is "Incapacidad"
+
+**Inactivo:**
+- Requires: `ausencia_desde`, `ausencia_hasta`, `tipo_ausencia = "Permiso"`, `motivo_ausencia`
+- System validates that tipo_ausencia is "Permiso"
+
+**Baja:**
+- Requires: `ausencia_desde`, `motivo_ausencia`
+- System automatically sets: `ausencia_hasta = null`, `tipo_ausencia = null`
+- This is a **terminal state** - no further modifications allowed
+
+**Activo:**
+- System automatically clears all absence fields: `ausencia_desde`, `ausencia_hasta`, `tipo_ausencia`, `motivo_ausencia` = null
+
+#### Audit Trail
+- All changes are logged to the audit system
+- State changes trigger `logStatusChange`
+- Other updates trigger `logUpdate` with before/after comparison
+- Absence history is saved to `historial_ausencias` table for non-Activo transitions
+
+### Error Responses
+
+<CodeGroup>
+```json Terminal State
+{
+  "success": false,
+  "error": "Estado terminal: No se pueden realizar cambios en un colaborador dado de Baja"
+}
+```
+
+```json Missing Required Fields
+{
+  "success": false,
+  "error": "La fecha de inicio de ausencia es obligatoria"
+}
+```
+
+```json Invalid Type/State Combination
+{
+  "success": false,
+  "error": "Tipo de ausencia debe ser 'Incapacidad' para estado 'Incapacitado'"
+}
+```
+</CodeGroup>
+
+---
+
+## Assign Role
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.prod-sys.com/api/personal/15/rol \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rol_id": 5,
+    "motivo_cambio": "Promoción a supervisor de línea",
+    "es_correccion": false,
+    "categoria_motivo": "Promoción"
+  }'
+```
+</CodeGroup>
+
+<RequestExample>
+```json Request Body
+{
+  "rol_id": 5,
+  "motivo_cambio": "Promoción a supervisor de línea",
+  "es_correccion": false,
+  "categoria_motivo": "Promoción"
+}
+```
+</RequestExample>
+
+<ResponseExample>
+```json Response
+{
+  "success": true,
+  "message": "Rol asignado correctamente."
+}
+```
+</ResponseExample>
+
+### Parameters
+
+<ParamField path="id" type="integer" required>
+  Personnel ID
+</ParamField>
+
+### Authorization
+**Required Permission:** `MANAGE_STAFF`
+
+### Request Body
+
+<ParamField body="rol_id" type="integer" required>
+  System role ID to assign. Must be a valid role from the roles catalog.
+</ParamField>
+
+<ParamField body="motivo_cambio" type="string" required>
+  Reason for the role change (minimum 5 characters). Required for audit trail.
+</ParamField>
+
+<ParamField body="es_correccion" type="boolean" optional default="false">
+  Mark this change as a correction. If true, "[CORRECCIÓN]" prefix is added to motivo_cambio.
+</ParamField>
+
+<ParamField body="categoria_motivo" type="string" optional>
+  Category of the change reason for audit classification
+</ParamField>
+
+### Business Logic
+
+1. **Terminal State Protection**: Cannot assign roles to staff with `estado_laboral = "Baja"`
+2. **Transaction Safety**: Role assignment runs within a database transaction
+3. **Historical Tracking**: 
+   - Previous role assignment is deactivated (`activo = 0`)
+   - New role assignment is inserted into `persona_roles` table with `activo = 1`
+   - Current role in `usuarios` table is updated
+4. **Audit Trail**: Comprehensive audit log created with action `ROLE_CHANGE`
+5. **Correction Support**: If `es_correccion = true`, the motivo is prefixed with "[CORRECCIÓN]"
+
+### Error Responses
+
+<CodeGroup>
+```json Not Found
+{
+  "success": false,
+  "error": "Persona no encontrada"
+}
+```
+
+```json Terminal State
+{
+  "success": false,
+  "error": "Estado terminal: No se pueden realizar cambios en un colaborador dado de Baja"
+}
+```
+
+```json Missing Reason
+{
+  "success": false,
+  "error": "El motivo del cambio de rol es obligatorio"
+}
+```
+</CodeGroup>
+
+---
+
+## Reset Password
+
+<CodeGroup>
+```bash cURL
+curl -X PUT https://api.prod-sys.com/api/personal/15/reset-password \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+<ResponseExample>
+```json Response
+{
+  "success": true,
+  "data": {
+    "tempPassword": "m3n9k5x2"
+  }
+}
+```
+</ResponseExample>
+
+### Parameters
+
+<ParamField path="id" type="integer" required>
+  Personnel ID
+</ParamField>
+
+### Authorization
+**Required Permission:** `MANAGE_STAFF`
+
+### Response Schema
+
+<ResponseField name="success" type="boolean" required>
+  Request success indicator
+</ResponseField>
+
+<ResponseField name="data" type="object" required>
+  <ResponseField name="tempPassword" type="string">
+    Newly generated temporary password (8 characters)
+  </ResponseField>
+</ResponseField>
+
+### Business Logic
+
+1. **Password Generation**: System generates a random 8-character alphanumeric password
+2. **Password Hashing**: Password is hashed with bcrypt (10 rounds) before storage
+3. **Force Change**: The `must_change_password` flag is automatically set to `true`
+4. **Audit Trail**: Logged with action `PASSWORD_RESET` and reason "Reset de contraseña por administrador"
+5. **User Validation**: Verifies that the person has an associated user account
+
+<Warning>
+  In production environments, the temporary password should be sent to the user via secure email and not returned in the API response.
+</Warning>
+
+---
+
+## Assign Operation
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.prod-sys.com/api/personal/15/asignacion \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "proceso_id": 101,
+    "maquina_id": 7,
+    "turno": "T1",
+    "permanente": false,
+    "motivo_cambio": "Asignación temporal para cobertura de vacaciones",
+    "es_correccion": false
+  }'
+```
+</CodeGroup>
+
+<RequestExample>
+```json Request Body
+{
+  "proceso_id": 101,
+  "maquina_id": 7,
+  "turno": "T1",
+  "permanente": false,
+  "motivo_cambio": "Asignación temporal para cobertura de vacaciones",
+  "es_correccion": false
+}
+```
+</RequestExample>
+
+<ResponseExample>
+```json Response
+{
+  "success": true,
+  "message": "Asignación operativa registrada correctamente."
+}
+```
+</ResponseExample>
+
+### Parameters
+
+<ParamField path="id" type="integer" required>
+  Personnel ID to assign
+</ParamField>
+
+### Authorization
+**Required Permission:** `ASSIGN_OPERATIONS`
+
+### Request Body
+
+<ParamField body="proceso_id" type="integer" required>
+  Process ID to assign the person to. Must be a valid process from ProcessRegistry.
+</ParamField>
+
+<ParamField body="maquina_id" type="integer" optional>
+  Machine ID if the assignment is machine-specific. Machine must exist and not be in "Baja" or "Fuera de servicio" status.
+</ParamField>
+
+<ParamField body="turno" type="string" required>
+  Shift identifier (e.g., "T1", "T2", "T3", "T4")
+</ParamField>
+
+<ParamField body="permanente" type="boolean" optional default="false">
+  Whether this is a permanent assignment
+</ParamField>
+
+<ParamField body="motivo_cambio" type="string" optional>
+  Reason for the assignment (minimum 5 characters). Defaults to "Asignación operativa regular"
+</ParamField>
+
+<ParamField body="es_correccion" type="boolean" optional default="false">
+  Mark this assignment as a correction. If true, "[CORRECCIÓN]" prefix is added.
+</ParamField>
+
+<ParamField body="categoria_motivo" type="string" optional>
+  Category of the assignment for audit classification
+</ParamField>
+
+### Business Logic
+
+#### Assignment Validation
+
+1. **Personnel State Validation**:
+   - Only staff with `estado_laboral = "Activo"` can be assigned
+   - Returns error: "Asignación bloqueada: El colaborador se encuentra en estado {estado}. Solo colaboradores en estado Activo pueden participar en la operación."
+
+2. **User Account Validation**:
+   - Personnel must have an associated user account
+   - Technical admin user cannot be assigned to operations
+
+3. **Machine Validation** (if maquina_id provided):
+   - Machine must exist
+   - Machine cannot be in "Baja" or "Fuera de servicio" status
+   - Returns error: "Asignación bloqueada: La máquina {nombre} se encuentra en estado {estado}."
+
+4. **Transaction Safety**: All validations and inserts run within a database transaction
+
+5. **Audit Trail**: Logged with action `OPERATIONAL_ASSIGNMENT` including proceso_id, maquina_id, and turno
+
+### Error Responses
+
+<CodeGroup>
+```json Personnel Not Active
+{
+  "success": false,
+  "error": "Asignación bloqueada: El colaborador se encuentra en estado Incapacitado. Solo colaboradores en estado Activo pueden participar en la operación."
+}
+```
+
+```json Machine Not Available
+{
+  "success": false,
+  "error": "Asignación bloqueada: La máquina CNC-001 se encuentra en estado Fuera de servicio."
+}
+```
+
+```json No User Account
+{
+  "success": false,
+  "error": "Asignación bloqueada: No se encontró un usuario asociado a esta persona"
+}
+```
+</CodeGroup>
+
+---
+
+## Toggle Access
+
+<CodeGroup>
+```bash cURL
+curl -X PUT https://api.prod-sys.com/api/personal/15/acceso \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "acceso_activo": false
+  }'
+```
+</CodeGroup>
+
+<RequestExample>
+```json Request Body
+{
+  "acceso_activo": false
+}
+```
+</RequestExample>
+
+<ResponseExample>
+```json Response
+{
+  "success": true,
+  "data": {
+    "acceso_activo": false
+  }
+}
+```
+</ResponseExample>
+
+### Parameters
+
+<ParamField path="id" type="integer" required>
+  Personnel ID
+</ParamField>
+
+### Authorization
+**Required Permission:** `MANAGE_STAFF`
+
+### Request Body
+
+<ParamField body="acceso_activo" type="boolean" required>
+  Whether to activate or deactivate system access
+</ParamField>
+
+### Business Logic
+
+1. **Area Restriction**: This endpoint only works for personnel in the "Producción" area
+2. **Terminal State Protection**: Cannot toggle access for staff with `estado_laboral = "Baja"`
+3. **User Validation**: Verifies that the person has an associated user account
+4. **State Update**: Updates `estado_usuario` in the `usuarios` table to "Activo" or "Inactivo"
+5. **Audit Trail**: Logged with action `TOGGLE_ACCESO` showing before/after estado_usuario values
+
+<Info>
+  This feature is specifically designed for production floor personnel who may need temporary access suspension without changing their labor status.
+</Info>
+
+### Error Responses
+
+<CodeGroup>
+```json Wrong Area
+{
+  "success": false,
+  "error": "El control de acceso por toggle solo aplica a personal de Producción"
+}
+```
+
+```json Terminal State
+{
+  "success": false,
+  "error": "No se puede modificar acceso de un colaborador dado de Baja"
+}
+```
+
+```json No User Account
+{
+  "success": false,
+  "error": "Este colaborador no tiene cuenta de acceso"
+}
+```
+</CodeGroup>
+
+---
+
+## Get Catalogs
+
+<CodeGroup>
+```bash cURL
+curl -X GET https://api.prod-sys.com/api/personal/catalogos \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+<ResponseExample>
+```json Response
+{
+  "success": true,
+  "data": {
+    "areas": [
+      {
+        "id": 1,
+        "nombre": "Administración",
+        "descripcion": "Personal administrativo y de oficina"
+      },
+      {
+        "id": 2,
+        "nombre": "Producción",
+        "descripcion": "Personal de planta y operaciones"
+      },
+      {
+        "id": 3,
+        "nombre": "Calidad",
+        "descripcion": "Control de calidad e inspección"
+      },
+      {
+        "id": 4,
+        "nombre": "Mantenimiento",
+        "descripcion": "Mantenimiento preventivo y correctivo"
+      }
+    ],
+    "roles": [
+      {
+        "id": 1,
+        "nombre": "Administrador",
+        "descripcion": "Acceso completo al sistema"
+      },
+      {
+        "id": 2,
+        "nombre": "Supervisor",
+        "descripcion": "Supervisión de personal y operaciones"
+      },
+      {
+        "id": 3,
+        "nombre": "Operario",
+        "descripcion": "Personal operativo de planta"
+      },
+      {
+        "id": 4,
+        "nombre": "Calidad",
+        "descripcion": "Inspector de calidad"
+      }
+    ]
+  }
+}
+```
+</ResponseExample>
+
+### Authorization
+**Required Permission:** `VIEW_STAFF`
+
+### Response Schema
+
+Returns reference catalogs used for personnel management:
+
+<ResponseField name="success" type="boolean" required>
+  Request success indicator
+</ResponseField>
+
+<ResponseField name="data" type="object" required>
+  <ResponseField name="areas" type="array">
+    List of organizational areas
+    
+    <ResponseField name="id" type="integer">
+      Area ID
+    </ResponseField>
+    
+    <ResponseField name="nombre" type="string">
+      Area name
+    </ResponseField>
+    
+    <ResponseField name="descripcion" type="string">
+      Area description
+    </ResponseField>
+  </ResponseField>
+  
+  <ResponseField name="roles" type="array">
+    List of system roles
+    
+    <ResponseField name="id" type="integer">
+      Role ID
+    </ResponseField>
+    
+    <ResponseField name="nombre" type="string">
+      Role name
+    </ResponseField>
+    
+    <ResponseField name="descripcion" type="string">
+      Role description
+    </ResponseField>
+  </ResponseField>
+</ResponseField>
+
+### Usage
+
+This endpoint provides the catalog data needed for:
+- Populating dropdown menus in personnel forms
+- Validating area_id and rol_id in other endpoints
+- Displaying human-readable area and role names
+
+---
+
+## Get Operational Roles
+
+<CodeGroup>
+```bash cURL
+curl -X GET https://api.prod-sys.com/api/personal/roles-operativos \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+<ResponseExample>
+```json Response
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "nombre": "Auxiliar",
+      "descripcion": "Personal de apoyo operativo",
+      "activo": 1
+    },
+    {
+      "id": 2,
+      "nombre": "Operador Especializado",
+      "descripcion": "Operador certificado en procesos específicos",
+      "activo": 1
+    },
+    {
+      "id": 3,
+      "nombre": "Técnico",
+      "descripcion": "Técnico de línea con competencias avanzadas",
+      "activo": 1
+    }
+  ]
+}
+```
+</ResponseExample>
+
+### Authorization
+**Required Permission:** `VIEW_STAFF`
+
+### Response Schema
+
+Returns the list of operational roles (distinct from system roles):
+
+<ResponseField name="success" type="boolean" required>
+  Request success indicator
+</ResponseField>
+
+<ResponseField name="data" type="array" required>
+  List of active operational roles
+  
+  <ResponseField name="id" type="integer">
+    Operational role ID
+  </ResponseField>
+  
+  <ResponseField name="nombre" type="string">
+    Role name
+  </ResponseField>
+  
+  <ResponseField name="descripcion" type="string">
+    Role description
+  </ResponseField>
+  
+  <ResponseField name="activo" type="integer">
+    Active status (1 = active, 0 = inactive)
+  </ResponseField>
+</ResponseField>
+
+### Operational Roles vs System Roles
+
+<Info>
+  **System Roles** control permissions and access levels in the application (e.g., Administrador, Supervisor, Operario).
+  
+  **Operational Roles** define production floor responsibilities and competencies (e.g., Auxiliar, Operador Especializado, Técnico).
+  
+  A person can have one system role and one operational role simultaneously.
+</Info>
+
+---
+
+## Data Models
+
+### Personnel Entity
+
+Core personnel record stored in the `personas` table:
+
+```sql
+CREATE TABLE personas (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  nombre TEXT NOT NULL,
+  apellido TEXT NOT NULL,
+  codigo_interno TEXT UNIQUE NOT NULL,
+  area_id INTEGER,
+  email TEXT UNIQUE,
+  telefono TEXT,
+  fecha_ingreso DATE,
+  rol_organizacional TEXT NOT NULL,
+  estado_laboral TEXT DEFAULT 'Activo',
+  ausencia_desde DATE,
+  ausencia_hasta DATE,
+  tipo_ausencia TEXT,
+  motivo_ausencia TEXT,
+  created_by INTEGER,
+  updated_by INTEGER,
+  motivo_cambio TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### User Account Entity
+
+Authentication and authorization data stored in the `usuarios` table:
+
+```sql
+CREATE TABLE usuarios (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  persona_id INTEGER UNIQUE NOT NULL,
+  username TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  rol_id INTEGER,
+  estado_usuario TEXT DEFAULT 'Activo',
+  must_change_password INTEGER DEFAULT 1,
+  created_by INTEGER,
+  updated_by INTEGER,
+  motivo_cambio TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (persona_id) REFERENCES personas(id),
+  FOREIGN KEY (rol_id) REFERENCES roles(id)
+);
+```
+
+### Operational Assignment Entity
+
+Stored in `asignaciones_operativas` table:
+
+```sql
+CREATE TABLE asignaciones_operativas (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  persona_id INTEGER NOT NULL,
+  proceso_id INTEGER NOT NULL,
+  maquina_id INTEGER,
+  turno TEXT NOT NULL,
+  permanente INTEGER DEFAULT 0,
+  fecha_inicio DATETIME DEFAULT CURRENT_TIMESTAMP,
+  fecha_fin DATETIME,
+  created_by INTEGER,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (persona_id) REFERENCES personas(id),
+  FOREIGN KEY (maquina_id) REFERENCES MAQUINAS(id)
+);
+```
+
+---
+
+## Best Practices
+
+### State Management
+
+1. **Always check estado_efectivo**: When displaying personnel status, use `estado_efectivo` rather than `estado_laboral` to account for expired absences
+
+2. **Respect terminal states**: The `Baja` status is terminal and immutable. Design your UI to prevent modification attempts
+
+3. **Validate absence data**: When changing to non-Activo states, ensure all required absence fields are provided
+
+### Security
+
+1. **Permission enforcement**: All endpoints enforce role-based access control. Ensure your client application handles 403 Forbidden responses
+
+2. **Password handling**: Never log or store temporary passwords. Send them via secure channels only
+
+3. **Audit trail compliance**: Always provide meaningful `motivo_cambio` values for audit compliance
+
+### Performance
+
+1. **Use GET /catalogos once**: Cache the areas and roles catalogs in your client application rather than fetching on every form render
+
+2. **Batch operations**: When updating multiple personnel records, make parallel requests to improve throughput
+
+3. **Detail endpoint for full data**: Use GET /:id only when you need complete historical data. Use GET / for listing views
+
+### Error Handling
+
+```javascript
+try {
+  const response = await fetch('/api/personal', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(personnelData)
+  });
+  
+  const result = await response.json();
+  
+  if (!result.success) {
+    // Handle business logic errors
+    alert(result.error);
+  } else {
+    console.log('Personnel created:', result.data);
+  }
+} catch (error) {
+  // Handle network or server errors
+  console.error('Request failed:', error);
+}
+```
