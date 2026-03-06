@@ -1,0 +1,166 @@
+{
+  "projectType": "saas",
+  "projectName": "PROD-SYS",
+  "projectDescription": "Industrial traceability and quality management system for manufacturing operations with production tracking, quality control, and resource management.",
+  "theme": "linden",
+  "primaryColor": "#1e40af",
+  "lightColor": "#3b82f6",
+  "darkColor": "#1e3a8a",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/production-management",
+              "features/quality-control",
+              "features/resource-tracking",
+              "features/personnel-management"
+            ]
+          },
+          {
+            "group": "User Guides",
+            "pages": [
+              "guides/production-orders",
+              "guides/shift-logs",
+              "guides/incidents",
+              "guides/quality-batches",
+              "guides/traceability"
+            ]
+          },
+          {
+            "group": "Production Processes",
+            "pages": [
+              "processes/telares",
+              "processes/laminado",
+              "processes/imprenta",
+              "processes/conversion",
+              "processes/vestidos",
+              "processes/liner-pe",
+              "processes/extrusor-pp"
+            ]
+          },
+          {
+            "group": "Administration",
+            "pages": [
+              "admin/configuration",
+              "admin/user-management",
+              "admin/roles-permissions",
+              "admin/audit-logs"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Authentication",
+            "pages": [
+              "api/auth/login",
+              "api/auth/change-password"
+            ]
+          },
+          {
+            "group": "Production",
+            "pages": [
+              "api/production/bitacora",
+              "api/production/ordenes",
+              "api/production/incidentes",
+              "api/production/planning"
+            ]
+          },
+          {
+            "group": "Quality Control",
+            "pages": [
+              "api/quality/lotes",
+              "api/quality/muestras"
+            ]
+          },
+          {
+            "group": "Resources",
+            "pages": [
+              "api/resources/recursos",
+              "api/resources/consumos"
+            ]
+          },
+          {
+            "group": "Personnel & Groups",
+            "pages": [
+              "api/personnel/personal",
+              "api/personnel/grupos"
+            ]
+          },
+          {
+            "group": "Dashboard & Analytics",
+            "pages": [
+              "api/dashboard/summary",
+              "api/dashboard/orden"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Production order management and execution tracking",
+    "Shift-based bitácora (logbook) system",
+    "Real-time incident reporting and management",
+    "Quality control with batch (lote) and sample (muestra) tracking",
+    "Complete traceability across production chain",
+    "Resource consumption tracking and management",
+    "Multiple production process support (Telares, Laminado, Imprenta, etc.)",
+    "Personnel and group management with role-based access",
+    "Weekly production planning",
+    "Comprehensive audit logging",
+    "Real-time dashboard and analytics",
+    "SQLite database with WAL mode for concurrent access"
+  ],
+  "publicApiSurface": [
+    "POST /api/auth/login",
+    "POST /api/auth/change-password",
+    "GET /api/dashboard/summary",
+    "GET /api/dashboard/orden/:id",
+    "GET /api/bitacora",
+    "POST /api/bitacora",
+    "GET /api/ordenes-produccion",
+    "POST /api/ordenes-produccion",
+    "GET /api/incidentes",
+    "POST /api/incidentes",
+    "GET /api/lotes",
+    "POST /api/lotes",
+    "GET /api/muestras",
+    "POST /api/muestras",
+    "GET /api/recursos",
+    "POST /api/recursos",
+    "GET /api/consumos",
+    "POST /api/consumos",
+    "GET /api/telares",
+    "GET /api/laminado",
+    "GET /api/imprenta",
+    "GET /api/conversion",
+    "GET /api/vestidos",
+    "GET /api/liner-pe",
+    "GET /api/extrusor-pp",
+    "GET /api/personal",
+    "POST /api/personal",
+    "GET /api/grupos",
+    "POST /api/grupos",
+    "GET /api/auditoria",
+    "GET /api/planning",
+    "POST /api/planning",
+    "GET /api/procesos",
+    "GET /api/maquinas",
+    "GET /api/paros"
+  ]
+}
